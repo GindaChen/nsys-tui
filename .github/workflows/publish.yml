@@ -7,8 +7,6 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write  # OIDC for trusted publishing
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -18,4 +16,5 @@ jobs:
       - run: python -m build
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        # No password needed — uses OIDC trusted publishing
+        with:
+          password: ${{ secrets.PYPI_TOKEN }}
