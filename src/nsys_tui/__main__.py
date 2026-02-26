@@ -14,6 +14,9 @@ Commands:
     export-json <profile.sqlite> --gpu N --trim S E Export flat JSON
     export     <profile.sqlite> [--gpu N] -o DIR    Export Perfetto JSON traces
     viewer     <profile.sqlite> --gpu N -o FILE     Generate interactive HTML viewer
+    web        <profile.sqlite> --gpu N --trim S E  Serve viewer in browser (local HTTP)
+    perfetto   <profile.sqlite> --gpu N --trim S E  Open in Perfetto UI (via local trace server)
+    timeline-web <profile.sqlite> --gpu N --trim S E Horizontal timeline in browser
     tui        <profile.sqlite> --gpu N --trim S E  Terminal tree view
     timeline   <profile.sqlite> --gpu N --trim S E  Horizontal timeline (Perfetto-style)
 """
@@ -109,6 +112,24 @@ def main():
     p = sub.add_parser("viewer", help="Generate interactive HTML viewer")
     _add_gpu_trim(p)
     p.add_argument("-o", "--output", default="nvtx_tree.html", help="Output HTML file")
+
+    # ── web ──
+    p = sub.add_parser("web", help="Serve interactive viewer in browser")
+    _add_gpu_trim(p)
+    p.add_argument("--port", type=int, default=8142, help="HTTP port (default: 8142)")
+    p.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
+
+    # ── perfetto ──
+    p = sub.add_parser("perfetto", help="Open trace in Perfetto UI")
+    _add_gpu_trim(p)
+    p.add_argument("--port", type=int, default=8143, help="HTTP port for trace (default: 8143)")
+    p.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
+
+    # ── timeline-web ──
+    p = sub.add_parser("timeline-web", help="Horizontal timeline in browser")
+    _add_gpu_trim(p)
+    p.add_argument("--port", type=int, default=8144, help="HTTP port (default: 8144)")
+    p.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
 
     # ── tui ──
     p = sub.add_parser("tui", help="Terminal tree view (rich)")
@@ -260,6 +281,24 @@ def main():
         write_html(prof, args.gpu, _parse_trim(args), args.output)
         print(f"Written to {args.output} ({os.path.getsize(args.output)//1024} KB)")
         prof.close()
+
+    elif args.command == "web":
+        from .web import serve
+        prof = _profile.open(args.profile)
+        serve(prof, args.gpu, _parse_trim(args),
+              port=args.port, open_browser=not args.no_browser)
+
+    elif args.command == "perfetto":
+        from .web import serve_perfetto
+        prof = _profile.open(args.profile)
+        serve_perfetto(prof, args.gpu, _parse_trim(args),
+                       port=args.port, open_browser=not args.no_browser)
+
+    elif args.command == "timeline-web":
+        from .web import serve_timeline
+        prof = _profile.open(args.profile)
+        serve_timeline(prof, args.gpu, _parse_trim(args),
+                       port=args.port, open_browser=not args.no_browser)
 
     elif args.command == "tui":
         from .tui import run_tui

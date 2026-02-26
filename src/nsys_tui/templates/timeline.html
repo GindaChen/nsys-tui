@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timeline — $GPU_LABEL</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --surface: #161b22;
+            --border: #30363d;
+            --text: #e6edf3;
+            --text-dim: #8b949e;
+            --accent: #58a6ff;
+            --nvtx: #1f6feb;
+            --kernel: #238636;
+            --nccl: #d2a8ff;
+            --heat-0: #238636;
+            --heat-50: #d4a72c;
+            --heat-100: #da3633;
+            --sel: #264f78
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0
+        }
+
+        body {
+            font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+            font-size: 13px;
+            background: var(--bg);
+            color: var(--text);
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column
+        }
+
+        header {
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-shrink: 0
+        }
+
+        header h1 {
+            font-size: 14px;
+            color: var(--accent);
+            font-weight: 600
+        }
+
+        header .sub {
+            color: var(--text-dim);
+            font-size: 11px
+        }
+
+        header .stats {
+            margin-left: auto;
+            font-size: 11px;
+            color: var(--text-dim)
+        }
+
+        header .stats strong {
+            color: var(--text)
+        }
+
+        .toolbar {
+            padding: 4px 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            font-size: 11px;
+            flex-shrink: 0
+        }
+
+        .toolbar button {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 2px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            font-family: inherit
+        }
+
+        .toolbar button:hover {
+            border-color: var(--accent)
+        }
+
+        .toolbar button.active {
+            border-color: var(--accent);
+            background: #1a2332
+        }
+
+        .toolbar .sep {
+            width: 1px;
+            height: 16px;
+            background: var(--border)
+        }
+
+        .toolbar input {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-family: inherit;
+            width: 200px
+        }
+
+        .toolbar .hint {
+            color: var(--text-dim)
+        }
+
+        #canvasWrap {
+            flex: 1;
+            overflow: hidden;
+            position: relative;
+            cursor: crosshair
+        }
+
+        canvas {
+            display: block
+        }
+
+        #detail {
+            height: 120px;
+            border-top: 1px solid var(--border);
+            padding: 8px 16px;
+            overflow-y: auto;
+            flex-shrink: 0;
+            font-size: 12px;
+            background: var(--surface)
+        }
+
+        #detail.empty {
+            color: var(--text-dim)
+        }
+
+        .detail-name {
+            color: #7ee787;
+            font-weight: 600;
+            font-size: 13px
+        }
+
+        .detail-dur {
+            color: var(--text-dim);
+            font-size: 11px
+        }
+
+        .detail-path {
+            margin-top: 4px;
+            font-size: 11px
+        }
+
+        .detail-path span {
+            color: var(--accent)
+        }
+
+        .detail-path .sep {
+            color: var(--text-dim);
+            margin: 0 4px
+        }
+
+        .tooltip {
+            position: fixed;
+            background: #1c2333;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 11px;
+            z-index: 9998;
+            pointer-events: none;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, .4);
+            max-width: 400px;
+            white-space: nowrap
+        }
+
+        .help-overlay {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px 24px;
+            z-index: 9999;
+            font-size: 12px;
+            min-width: 320px;
+            display: none
+        }
+
+        .help-overlay h2 {
+            color: var(--accent);
+            font-size: 14px;
+            margin-bottom: 8px
+        }
+
+        .help-overlay table td {
+            padding: 2px 12px 2px 0
+        }
+
+        .help-overlay .key {
+            color: var(--accent);
+            font-weight: 600;
+            min-width: 60px;
+            display: inline-block
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>⏱ Timeline</h1>
+        <span class="sub">$GPU_LABEL &nbsp;|&nbsp; $TRIM_LABEL</span>
+        <span class="stats" id="stats"></span>
+    </header>
+    <div class="toolbar" id="toolbar">
+        <button onclick="zoomIn()" title="+">＋ Zoom</button>
+        <button onclick="zoomOut()" title="-">－ Zoom</button>
+        <button onclick="fitAll()" title="Home">⌂ Fit</button>
+        <div class="sep"></div>
+        <button onclick="toggleNVTX()" id="nvtxBtn" class="active">NVTX</button>
+        <div class="sep"></div>
+        <input type="text" id="searchInput" placeholder="/ to search kernels..." oninput="onSearch()">
+        <span class="hint" id="searchHint"></span>
+        <div class="sep"></div>
+        <button onclick="toggleHelp()">? Help</button>
+    </div>
+    <div id="canvasWrap"><canvas id="c"></canvas></div>
+    <div id="detail" class="empty">Click a kernel to see details. Keyboard: ←/→ pan, +/- zoom, ↑/↓ stream, / search, ?
+        help</div>
+    <div class="tooltip" id="tooltip" style="display:none"></div>
+    <div class="help-overlay" id="helpOverlay">
+        <h2>Keyboard Shortcuts</h2>
+        <table>
+            <tr>
+                <td><span class="key">← →</span></td>
+                <td>Pan viewport</td>
+            </tr>
+            <tr>
+                <td><span class="key">+ −</span></td>
+                <td>Zoom in/out</td>
+            </tr>
+            <tr>
+                <td><span class="key">↑ ↓</span></td>
+                <td>Select stream</td>
+            </tr>
+            <tr>
+                <td><span class="key">Home</span></td>
+                <td>Fit all</td>
+            </tr>
+            <tr>
+                <td><span class="key">Tab</span></td>
+                <td>Next kernel in stream</td>
+            </tr>
+            <tr>
+                <td><span class="key">S+Tab</span></td>
+                <td>Previous kernel</td>
+            </tr>
+            <tr>
+                <td><span class="key">/</span></td>
+                <td>Search kernels</td>
+            </tr>
+            <tr>
+                <td><span class="key">Esc</span></td>
+                <td>Clear selection/search</td>
+            </tr>
+            <tr>
+                <td><span class="key">N</span></td>
+                <td>Toggle NVTX lanes</td>
+            </tr>
+            <tr>
+                <td><span class="key">F</span></td>
+                <td>Toggle focus (hide toolbar)</td>
+            </tr>
+            <tr>
+                <td><span class="key">?</span></td>
+                <td>Toggle help</td>
+            </tr>
+        </table>
+        <div style="margin-top:8px;color:var(--text-dim);font-size:11px">Mouse: scroll=zoom, drag=pan, click=select
+        </div>
+    </div>
+
+    <script>
+        const DATA = $DATA;
+        const canvas = document.getElementById('c');
+        const ctx = canvas.getContext('2d');
+        const wrap = document.getElementById('canvasWrap');
+
+        // ── Data extraction ──
+        const allNodes = []; const kernels = []; const nvtxSpans = [];
+        function extractData(nodes, path, depth) {
+            for (const n of nodes) {
+                const np = path ? path + ' > ' + n.name : n.name;
+                n._path = np; n._depth = depth;
+                allNodes.push(n);
+                if (n.type === 'kernel') { n._path = np; kernels.push(n); }
+                else if (n.type === 'nvtx' && n.start_ns && n.end_ns) {
+                    nvtxSpans.push({ name: n.name, start: n.start_ns, end: n.end_ns, depth, path: np, dur: n.duration_ms });
+                }
+                if (n.children) extractData(n.children, np, depth + 1);
+            }
+        }
+        extractData(DATA, '', 0);
+        kernels.sort((a, b) => a.start_ns - b.start_ns);
+
+        // Streams
+        const streamMap = {};
+        kernels.forEach(k => { const s = k.stream !== undefined ? String(k.stream) : '?'; if (!streamMap[s]) streamMap[s] = []; streamMap[s].push(k); });
+        const streamIds = Object.keys(streamMap).sort((a, b) => {
+            const ai = parseInt(a), bi = parseInt(b);
+            if (!isNaN(ai) && !isNaN(bi)) return ai - bi;
+            return a.localeCompare(b);
+        });
+        streamIds.forEach(s => streamMap[s].sort((a, b) => a.start_ns - b.start_ns));
+
+        // Time bounds
+        const timeStart = kernels.length ? Math.min(...kernels.map(k => k.start_ns), ...nvtxSpans.map(s => s.start)) : 0;
+        const timeEnd = kernels.length ? Math.max(...kernels.map(k => k.end_ns), ...nvtxSpans.map(s => s.end)) : 1;
+        const timeSpan = Math.max(timeEnd - timeStart, 1);
+
+        // NVTX depth
+        const nvtxMaxDepth = nvtxSpans.length ? Math.min(6, Math.max(...nvtxSpans.map(s => s.depth)) + 1) : 0;
+
+        // Stats
+        const totalKernels = kernels.length;
+        const totalNVTX = nvtxSpans.length;
+        const totalMs = kernels.reduce((a, k) => a + k.duration_ms, 0);
+        document.getElementById('stats').innerHTML =
+            `<span>Kernels: <strong>${totalKernels}</strong></span> &nbsp; ` +
+            `<span>NVTX: <strong>${totalNVTX}</strong></span> &nbsp; ` +
+            `<span>GPU: <strong>${totalMs.toFixed(1)}ms</strong></span>`;
+
+        // ── State ──
+        let viewStart = timeStart - timeSpan * 0.02;
+        let viewEnd = timeEnd + timeSpan * 0.02;
+        let selectedKernel = null;
+        let selectedStreamIdx = 0;
+        let showNVTX = true;
+        let searchQuery = '';
+        let searchMatches = new Set();
+        let isDragging = false, dragStartX = 0, dragViewStart = 0, dragViewEnd = 0;
+
+        // ── Layout constants ──
+        const LABEL_W = 90;
+        const RULER_H = 24;
+        const NVTX_ROW_H = 20;
+        const STREAM_H = 32;
+        const STREAM_GAP = 2;
+        const MIN_BLOCK_W = 2;
+        const DPR = window.devicePixelRatio || 1;
+
+        // ── Colors ──
+        const STREAM_COLORS = ['#238636', '#1f6feb', '#d2a8ff', '#f97583', '#d4a72c', '#58a6ff', '#7ee787'];
+        const NVTX_COLORS = ['#1f6feb', '#8957e5', '#1a7f37', '#bf4b8a', '#d4a72c', '#58a6ff'];
+
+        function streamColor(idx) { return STREAM_COLORS[idx % STREAM_COLORS.length]; }
+        function nvtxColor(depth) { return NVTX_COLORS[depth % NVTX_COLORS.length]; }
+
+        // ── Formatting ──
+        function fmtDur(ms) { return ms >= 1 ? ms.toFixed(2) + 'ms' : (ms * 1000).toFixed(0) + 'μs'; }
+        function fmtNs(ns) { return (ns / 1e6).toFixed(3) + 'ms'; }
+
+        // ── Resize ──
+        function resize() {
+            const r = wrap.getBoundingClientRect();
+            canvas.width = r.width * DPR;
+            canvas.height = r.height * DPR;
+            canvas.style.width = r.width + 'px';
+            canvas.style.height = r.height + 'px';
+            ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+            draw();
+        }
+        window.addEventListener('resize', resize);
+
+        // ── Coordinate helpers ──
+        function nsToX(ns) {
+            const w = canvas.width / DPR - LABEL_W;
+            return LABEL_W + (ns - viewStart) / (viewEnd - viewStart) * w;
+        }
+        function xToNs(x) {
+            const w = canvas.width / DPR - LABEL_W;
+            return viewStart + (x - LABEL_W) / w * (viewEnd - viewStart);
+        }
+
+        function nvtxAreaH() { return showNVTX && nvtxSpans.length ? nvtxMaxDepth * NVTX_ROW_H + 4 : 0; }
+        function streamY(idx) { return RULER_H + nvtxAreaH() + idx * (STREAM_H + STREAM_GAP); }
+
+        // ── Draw ──
+        function draw() {
+            const W = canvas.width / DPR;
+            const H = canvas.height / DPR;
+            ctx.clearRect(0, 0, W, H);
+            ctx.font = '11px SF Mono, Cascadia Code, Fira Code, monospace';
+
+            drawRuler(W);
+            if (showNVTX) drawNVTX(W);
+            drawStreams(W, H);
+        }
+
+        function drawRuler(W) {
+            const tw = W - LABEL_W;
+            const viewSpan = viewEnd - viewStart;
+            // Nice interval
+            const rawInterval = viewSpan / (tw / 80);
+            const mag = Math.pow(10, Math.floor(Math.log10(rawInterval)));
+            const nice = [1, 2, 5, 10].find(n => n * mag >= rawInterval) * mag;
+
+            ctx.fillStyle = '#161b22';
+            ctx.fillRect(0, 0, W, RULER_H);
+            ctx.strokeStyle = '#30363d';
+            ctx.beginPath(); ctx.moveTo(0, RULER_H - 0.5); ctx.lineTo(W, RULER_H - 0.5); ctx.stroke();
+
+            const start = Math.ceil(viewStart / nice) * nice;
+            ctx.fillStyle = '#8b949e';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            for (let t = start; t <= viewEnd; t += nice) {
+                const x = nsToX(t);
+                if (x < LABEL_W || x > W) continue;
+                ctx.strokeStyle = '#30363d';
+                ctx.beginPath(); ctx.moveTo(x, RULER_H - 6); ctx.lineTo(x, RULER_H); ctx.stroke();
+                const ms = (t - timeStart) / 1e6;
+                const label = ms >= 1000 ? (ms / 1000).toFixed(2) + 's' : ms >= 1 ? ms.toFixed(2) + 'ms' : (ms * 1000).toFixed(0) + 'μs';
+                ctx.fillText(label, x, RULER_H - 7);
+            }
+
+            // Label
+            ctx.textAlign = 'right';
+            ctx.fillStyle = '#58a6ff';
+            ctx.fillText('Time', LABEL_W - 6, RULER_H - 7);
+        }
+
+        function drawNVTX(W) {
+            const baseY = RULER_H;
+            ctx.fillStyle = 'rgba(22. 27, 34, 0.6)';
+            ctx.fillRect(0, baseY, W, nvtxAreaH());
+
+            for (const span of nvtxSpans) {
+                if (span.depth >= nvtxMaxDepth) continue;
+                const x1 = Math.max(LABEL_W, nsToX(span.start));
+                const x2 = Math.min(W, nsToX(span.end));
+                if (x2 < LABEL_W || x1 > W) continue;
+                const w = Math.max(MIN_BLOCK_W, x2 - x1);
+                const y = baseY + span.depth * NVTX_ROW_H + 1;
+                const h = NVTX_ROW_H - 2;
+
+                ctx.fillStyle = nvtxColor(span.depth);
+                ctx.globalAlpha = 0.25;
+                ctx.fillRect(x1, y, w, h);
+                ctx.globalAlpha = 1;
+                ctx.strokeStyle = nvtxColor(span.depth);
+                ctx.globalAlpha = 0.5;
+                ctx.strokeRect(x1 + 0.5, y + 0.5, w - 1, h - 1);
+                ctx.globalAlpha = 1;
+
+                // Label if wide enough
+                if (w > 40) {
+                    ctx.fillStyle = '#e6edf3';
+                    ctx.textAlign = 'left';
+                    ctx.textBaseline = 'middle';
+                    ctx.save();
+                    ctx.beginPath(); ctx.rect(x1 + 2, y, w - 4, h); ctx.clip();
+                    ctx.font = '10px SF Mono, Cascadia Code, monospace';
+                    ctx.fillText(span.name, x1 + 4, y + h / 2);
+                    ctx.restore();
+                    ctx.font = '11px SF Mono, Cascadia Code, Fira Code, monospace';
+                }
+            }
+
+            // NVTX depth labels
+            for (let d = 0; d < nvtxMaxDepth; d++) {
+                ctx.fillStyle = '#8b949e';
+                ctx.textAlign = 'right';
+                ctx.textBaseline = 'middle';
+                ctx.font = '9px SF Mono, monospace';
+                ctx.fillText('L' + d, LABEL_W - 6, baseY + d * NVTX_ROW_H + NVTX_ROW_H / 2);
+            }
+            ctx.font = '11px SF Mono, Cascadia Code, Fira Code, monospace';
+
+            // Separator
+            const sepY = baseY + nvtxAreaH() - 1;
+            ctx.strokeStyle = '#30363d';
+            ctx.beginPath(); ctx.moveTo(0, sepY); ctx.lineTo(W, sepY); ctx.stroke();
+        }
+
+        function drawStreams(W, H) {
+            const baseY = RULER_H + nvtxAreaH();
+
+            for (let si = 0; si < streamIds.length; si++) {
+                const sid = streamIds[si];
+                const ks = streamMap[sid];
+                const y = streamY(si);
+                const isSelected = si === selectedStreamIdx;
+                const color = streamColor(si);
+
+                // Background
+                if (isSelected) {
+                    ctx.fillStyle = 'rgba(38, 79, 120, 0.3)';
+                    ctx.fillRect(0, y, W, STREAM_H);
+                }
+
+                // Stream label
+                ctx.fillStyle = isSelected ? '#58a6ff' : '#8b949e';
+                ctx.textAlign = 'right';
+                ctx.textBaseline = 'middle';
+                const isNccl = ks.some(k => k.name.toLowerCase().includes('nccl'));
+                ctx.fillText((isNccl ? '⚡ ' : '') + 'S' + sid, LABEL_W - 6, y + STREAM_H / 2);
+
+                // Kernel blocks
+                for (const k of ks) {
+                    let x1 = nsToX(k.start_ns);
+                    let x2 = nsToX(k.end_ns);
+                    if (x2 < LABEL_W || x1 > W) continue;
+                    x1 = Math.max(LABEL_W, x1);
+                    x2 = Math.min(W, x2);
+                    const w = Math.max(MIN_BLOCK_W, x2 - x1);
+                    const bY = y + 2;
+                    const bH = STREAM_H - 4;
+
+                    const isMatch = searchQuery && searchMatches.has(k);
+                    const isSel = k === selectedKernel;
+                    const isNcclK = k.name.toLowerCase().includes('nccl');
+
+                    // Color
+                    let fillColor = isNcclK ? '#d2a8ff' : color;
+                    let alpha = 0.6 + 0.4 * (k.heat || 0);
+                    if (searchQuery && !isMatch) alpha = 0.12;
+                    if (isSel) { fillColor = '#58a6ff'; alpha = 1; }
+
+                    ctx.globalAlpha = alpha;
+                    ctx.fillStyle = fillColor;
+                    ctx.fillRect(x1, bY, w, bH);
+                    ctx.globalAlpha = 1;
+
+                    if (isSel) {
+                        ctx.strokeStyle = '#58a6ff';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(x1, bY, w, bH);
+                        ctx.lineWidth = 1;
+                    }
+
+                    // Kernel name label
+                    if (w > 30) {
+                        ctx.fillStyle = isSel ? '#fff' : (searchQuery && !isMatch ? '#555' : '#e6edf3');
+                        ctx.textAlign = 'left';
+                        ctx.textBaseline = 'middle';
+                        ctx.save();
+                        ctx.beginPath(); ctx.rect(x1 + 1, bY, w - 2, bH); ctx.clip();
+                        const short = k.name.length > 30 ? k.name.slice(0, 28) + '…' : k.name;
+                        const label = w > 100 ? short + ' ' + fmtDur(k.duration_ms) : w > 60 ? fmtDur(k.duration_ms) : '';
+                        if (label) ctx.fillText(label, x1 + 3, bY + bH / 2);
+                        ctx.restore();
+                    }
+                }
+
+                // Gridline
+                if (si < streamIds.length - 1) {
+                    ctx.strokeStyle = '#1c2230';
+                    ctx.beginPath(); ctx.moveTo(LABEL_W, y + STREAM_H + 1); ctx.lineTo(W, y + STREAM_H + 1); ctx.stroke();
+                }
+            }
+        }
+
+        // ── Hit testing ──
+        function hitTest(mx, my) {
+            for (let si = 0; si < streamIds.length; si++) {
+                const y = streamY(si);
+                if (my < y || my > y + STREAM_H) continue;
+                const ks = streamMap[streamIds[si]];
+                for (const k of ks) {
+                    const x1 = Math.max(LABEL_W, nsToX(k.start_ns));
+                    const x2 = Math.min(canvas.width / DPR, nsToX(k.end_ns));
+                    if (mx >= x1 && mx <= Math.max(x1 + MIN_BLOCK_W, x2)) {
+                        return { kernel: k, streamIdx: si };
+                    }
+                }
+                return { kernel: null, streamIdx: si };
+            }
+            return null;
+        }
+
+        // ── Detail panel ──
+        function showDetail(k) {
+            if (!k) {
+                document.getElementById('detail').className = 'empty';
+                document.getElementById('detail').innerHTML = 'Click a kernel to see details. Keyboard: ←/→ pan, +/- zoom, ↑/↓ stream, / search, ? help';
+                return;
+            }
+            const parts = (k._path || '').split(' > ');
+            const pathHtml = parts.slice(0, -1).map(p => `<span>${escH(p)}</span>`).join('<span class="sep">›</span>');
+
+            document.getElementById('detail').className = '';
+            document.getElementById('detail').innerHTML =
+                `<div class="detail-name">⚡ ${escH(k.name)}</div>` +
+                `<div class="detail-dur">${fmtDur(k.duration_ms)} &nbsp;|&nbsp; Stream ${k.stream ?? '?'} &nbsp;|&nbsp; ${fmtNs(k.start_ns)} → ${fmtNs(k.end_ns)}</div>` +
+                (pathHtml ? `<div class="detail-path">📦 ${pathHtml}</div>` : '');
+        }
+
+        function escH(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+        // ── Navigation ──
+        function panBy(fraction) {
+            const span = viewEnd - viewStart;
+            const delta = span * fraction;
+            viewStart += delta; viewEnd += delta;
+            draw();
+        }
+        function zoomAt(factor, centerNs) {
+            if (centerNs === undefined) centerNs = (viewStart + viewEnd) / 2;
+            const span = viewEnd - viewStart;
+            const newSpan = span * factor;
+            const minSpan = 100; // 100 ns minimum
+            if (newSpan < minSpan) return;
+            const ratio = (centerNs - viewStart) / span;
+            viewStart = centerNs - newSpan * ratio;
+            viewEnd = centerNs + newSpan * (1 - ratio);
+            draw();
+        }
+        function zoomIn() { zoomAt(0.5); }
+        function zoomOut() { zoomAt(2); }
+        function fitAll() {
+            viewStart = timeStart - timeSpan * 0.02;
+            viewEnd = timeEnd + timeSpan * 0.02;
+            draw();
+        }
+
+        function selectKernel(k) {
+            selectedKernel = k;
+            showDetail(k);
+            draw();
+        }
+
+        function nextKernel(dir) {
+            const sid = streamIds[selectedStreamIdx];
+            const ks = streamMap[sid];
+            if (!ks || !ks.length) return;
+            if (!selectedKernel || selectedKernel.stream !== undefined && String(selectedKernel.stream) !== sid) {
+                selectKernel(ks[0]); ensureVisible(ks[0]); return;
+            }
+            const idx = ks.indexOf(selectedKernel);
+            const next = idx + dir;
+            if (next >= 0 && next < ks.length) {
+                selectKernel(ks[next]); ensureVisible(ks[next]);
+            }
+        }
+
+        function ensureVisible(k) {
+            const span = viewEnd - viewStart;
+            if (k.start_ns < viewStart || k.end_ns > viewEnd) {
+                const center = (k.start_ns + k.end_ns) / 2;
+                viewStart = center - span / 2;
+                viewEnd = center + span / 2;
+                draw();
+            }
+        }
+
+        function toggleNVTX() {
+            showNVTX = !showNVTX;
+            document.getElementById('nvtxBtn').classList.toggle('active', showNVTX);
+            draw();
+        }
+
+        function toggleHelp() {
+            const h = document.getElementById('helpOverlay');
+            h.style.display = h.style.display === 'none' ? 'block' : 'none';
+        }
+
+        // ── Search ──
+        function onSearch() {
+            searchQuery = document.getElementById('searchInput').value.trim().toLowerCase();
+            searchMatches = new Set();
+            if (searchQuery) {
+                kernels.forEach(k => { if (k.name.toLowerCase().includes(searchQuery)) searchMatches.add(k); });
+                document.getElementById('searchHint').textContent = searchMatches.size + ' matches';
+            } else {
+                document.getElementById('searchHint').textContent = '';
+            }
+            draw();
+        }
+
+        // ── Mouse events ──
+        canvas.addEventListener('mousedown', e => {
+            if (e.button !== 0) return;
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+            if (mx < LABEL_W) return;
+
+            const hit = hitTest(mx, my);
+            if (hit) {
+                selectedStreamIdx = hit.streamIdx;
+                if (hit.kernel) { selectKernel(hit.kernel); return; }
+            }
+
+            isDragging = true;
+            dragStartX = e.clientX;
+            dragViewStart = viewStart;
+            dragViewEnd = viewEnd;
+            canvas.style.cursor = 'grabbing';
+        });
+
+        canvas.addEventListener('mousemove', e => {
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+
+            if (isDragging) {
+                const dx = e.clientX - dragStartX;
+                const w = canvas.width / DPR - LABEL_W;
+                const nsPerPx = (dragViewEnd - dragViewStart) / w;
+                viewStart = dragViewStart - dx * nsPerPx;
+                viewEnd = dragViewEnd - dx * nsPerPx;
+                draw();
+                return;
+            }
+
+            // Tooltip
+            const hit = hitTest(mx, my);
+            const tt = document.getElementById('tooltip');
+            if (hit && hit.kernel) {
+                const k = hit.kernel;
+                const isNccl = k.name.toLowerCase().includes('nccl');
+                tt.innerHTML = `<div style="color:${isNccl ? '#d2a8ff' : '#7ee787'};font-weight:600">${escH(k.name)}</div>` +
+                    `<div style="color:#8b949e">${fmtDur(k.duration_ms)} &nbsp;|&nbsp; Stream ${k.stream ?? '?'}</div>`;
+                tt.style.display = 'block';
+                tt.style.left = (e.clientX + 12) + 'px';
+                tt.style.top = (e.clientY - 10) + 'px';
+                // Keep on screen
+                const tr = tt.getBoundingClientRect();
+                if (tr.right > window.innerWidth) tt.style.left = (e.clientX - tr.width - 8) + 'px';
+                if (tr.bottom > window.innerHeight) tt.style.top = (e.clientY - tr.height - 8) + 'px';
+            } else {
+                tt.style.display = 'none';
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => { isDragging = false; canvas.style.cursor = 'crosshair'; });
+        canvas.addEventListener('mouseleave', () => {
+            isDragging = false; canvas.style.cursor = 'crosshair';
+            document.getElementById('tooltip').style.display = 'none';
+        });
+
+        canvas.addEventListener('wheel', e => {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const ns = xToNs(mx);
+            const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+            zoomAt(factor, ns);
+        }, { passive: false });
+
+        // ── Keyboard ──
+        document.addEventListener('keydown', e => {
+            const tag = e.target.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA') {
+                if (e.key === 'Escape') {
+                    e.target.blur(); searchQuery = ''; searchMatches.clear();
+                    document.getElementById('searchInput').value = ''; document.getElementById('searchHint').textContent = ''; draw();
+                }
+                return;
+            }
+
+            const helpEl = document.getElementById('helpOverlay');
+            if (helpEl.style.display === 'block' && e.key !== '?') { helpEl.style.display = 'none'; return; }
+
+            switch (e.key) {
+                case 'ArrowLeft': e.preventDefault(); panBy(-0.15); break;
+                case 'ArrowRight': e.preventDefault(); panBy(0.15); break;
+                case 'ArrowUp': e.preventDefault(); selectedStreamIdx = Math.max(0, selectedStreamIdx - 1); draw(); break;
+                case 'ArrowDown': e.preventDefault(); selectedStreamIdx = Math.min(streamIds.length - 1, selectedStreamIdx + 1); draw(); break;
+                case '+': case '=': zoomIn(); break;
+                case '-': case '_': zoomOut(); break;
+                case 'Home': fitAll(); break;
+                case 'Tab': e.preventDefault(); nextKernel(e.shiftKey ? -1 : 1); break;
+                case '/': e.preventDefault(); document.getElementById('searchInput').focus(); break;
+                case 'Escape':
+                    selectedKernel = null; showDetail(null);
+                    searchQuery = ''; searchMatches.clear();
+                    document.getElementById('searchInput').value = '';
+                    document.getElementById('searchHint').textContent = '';
+                    draw(); break;
+                case 'n': case 'N': toggleNVTX(); break;
+                case 'f': case 'F':
+                    document.getElementById('toolbar').style.display =
+                        document.getElementById('toolbar').style.display === 'none' ? 'flex' : 'none';
+                    resize(); break;
+                case '?': toggleHelp(); break;
+            }
+        });
+
+        // ── Init ──
+        setTimeout(resize, 0);
+    </script>
+</body>
+
+</html>

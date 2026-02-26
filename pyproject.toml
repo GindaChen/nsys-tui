@@ -3,8 +3,8 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "nsys-tui"
-version = "0.1.5"
+name = "nsys-ai"
+version = "0.2.0"
 description = "Terminal UI for NVIDIA Nsight Systems profiles — timeline viewer, kernel navigator, NVTX hierarchy"
 readme = "README.md"
 license = {text = "MIT"}
@@ -23,6 +23,7 @@ classifiers = [
 ]
 
 [project.scripts]
+nsys-ai = "nsys_tui.__main__:main"
 nsys-tui = "nsys_tui.__main__:main"
 
 [project.optional-dependencies]
@@ -34,3 +35,6 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 nsys_tui = ["templates/*.html"]
+
+[tool.bandit]
+skips = ["B110", "B608"]

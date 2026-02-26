@@ -1,0 +1,23 @@
+name: Security
+on: [push, pull_request]
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install project + tools
+        run: |
+          pip install -e '.[dev]'
+          pip install bandit[toml] pip-audit
+
+      - name: Bandit – static analysis
+        run: bandit -r src/ -c pyproject.toml
+
+      - name: pip-audit – dependency vulnerabilities
+        run: pip-audit
