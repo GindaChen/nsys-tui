@@ -6,8 +6,8 @@ Provides two modes:
   2. `serve_perfetto` — Serve Perfetto JSON and open ui.perfetto.dev.
 
 Usage:
-    nsys-tui web      profile.sqlite --gpu 0 --trim 39 42
-    nsys-tui perfetto profile.sqlite --gpu 0 --trim 39 42
+    nsys-ai web      profile.sqlite --gpu 0 --trim 39 42
+    nsys-ai perfetto profile.sqlite --gpu 0 --trim 39 42
 """
 import json
 import threading

@@ -1,4 +1,4 @@
-"""Basic smoke tests for nsys-tui package."""
+"""Basic smoke tests for nsys-ai package."""
 import subprocess
 import sys
 
@@ -9,7 +9,7 @@ def test_help():
         [sys.executable, "-m", "nsys_tui", "--help"],
         capture_output=True, text=True)
     assert result.returncode == 0
-    assert "nsys-tui" in result.stdout
+    assert "nsys-ai" in result.stdout
 
 
 def test_import():

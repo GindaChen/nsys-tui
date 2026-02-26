@@ -1,13 +1,13 @@
 <div align="center">
 
-# 🔬 nsys-tui
+# 🔬 nsys-ai
 
 **Terminal UI for NVIDIA Nsight Systems profiles**
 
 Navigate GPU kernel timelines, explore NVTX hierarchies, and analyze performance — all from your terminal.
 
-[![CI](https://github.com/GindaChen/nsys-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/GindaChen/nsys-tui/actions)
-[![PyPI](https://img.shields.io/pypi/v/nsys-tui)](https://pypi.org/project/nsys-tui/)
+[![CI](https://github.com/GindaChen/nsys-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/GindaChen/nsys-ai/actions)
+[![PyPI](https://img.shields.io/pypi/v/nsys-ai)](https://pypi.org/project/nsys-ai/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -18,7 +18,7 @@ Navigate GPU kernel timelines, explore NVTX hierarchies, and analyze performance
 ## ⚡ Install
 
 ```bash
-pip install nsys-tui
+pip install nsys-ai
 ```
 
 That's it. No system dependencies, no CUDA required. Just Python 3.10+.
@@ -27,7 +27,7 @@ That's it. No system dependencies, no CUDA required. Just Python 3.10+.
 
 ## 🎯 What It Does
 
-nsys-tui reads `.sqlite` profile exports from [NVIDIA Nsight Systems](https://developer.nvidia.com/nsight-systems) and gives you **three ways** to explore them:
+nsys-ai reads `.sqlite` profile exports from [NVIDIA Nsight Systems](https://developer.nvidia.com/nsight-systems) and gives you **three ways** to explore them:
 
 <table>
 <tr>
@@ -100,29 +100,29 @@ nsys profile -o my_training python train.py
 
 ```bash
 # Quick overview
-nsys-tui info my_training.sqlite
+nsys-ai info my_training.sqlite
 
 # Interactive timeline (the main attraction)
-nsys-tui timeline my_training.sqlite --gpu 0 --trim 39 42
+nsys-ai timeline my_training.sqlite --gpu 0 --trim 39 42
 
 # Interactive tree browser
-nsys-tui tui my_training.sqlite --gpu 0 --trim 39 42
+nsys-ai tui my_training.sqlite --gpu 0 --trim 39 42
 
 # GPU kernel summary
-nsys-tui summary my_training.sqlite --gpu 0
+nsys-ai summary my_training.sqlite --gpu 0
 ```
 
 ### 3. Export & share
 
 ```bash
 # Perfetto JSON (open in ui.perfetto.dev)
-nsys-tui export my_training.sqlite -o traces/
+nsys-ai export my_training.sqlite -o traces/
 
 # Interactive HTML viewer
-nsys-tui viewer my_training.sqlite --gpu 0 --trim 39 42 -o report.html
+nsys-ai viewer my_training.sqlite --gpu 0 --trim 39 42 -o report.html
 
 # Flat CSV/JSON for scripting
-nsys-tui export-csv my_training.sqlite --gpu 0 --trim 39 42 -o kernels.csv
+nsys-ai export-csv my_training.sqlite --gpu 0 --trim 39 42 -o kernels.csv
 ```
 
 ---
@@ -223,10 +223,10 @@ The [`docs/sqlite-explorer/`](docs/sqlite-explorer/) contains an **interactive H
 
 ## 🤖 AI Analysis (Optional)
 
-nsys-tui includes an optional AI module that can analyze your profiles:
+nsys-ai includes an optional AI module that can analyze your profiles:
 
 ```bash
-pip install nsys-tui[ai]
+pip install nsys-ai[ai]
 ```
 
 - **Auto-commentary** on kernel distributions and performance patterns
@@ -238,8 +238,8 @@ pip install nsys-tui[ai]
 ## 🧑‍💻 Development
 
 ```bash
-git clone https://github.com/GindaChen/nsys-tui.git
-cd nsys-tui
+git clone https://github.com/GindaChen/nsys-ai.git
+cd nsys-ai
 pip install -e '.[dev]'
 pytest tests/ -v
 ```

@@ -45,7 +45,7 @@ def _parse_trim(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="nsys-tui",
+        prog="nsys-ai",
         description="Terminal UI for NVIDIA Nsight Systems profiles",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
