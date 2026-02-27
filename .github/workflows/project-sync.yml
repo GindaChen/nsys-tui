@@ -1,0 +1,109 @@
+name: Sync Issues to Project Board
+
+on:
+  issues:
+    types: [labeled, unlabeled, closed, reopened]
+  pull_request:
+    types: [closed]
+
+env:
+  PROJECT_NUM: 5
+  PROJECT_OWNER: GindaChen
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Move issue based on agent label
+        if: github.event_name == 'issues'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const issue = context.payload.issue;
+            const labels = issue.labels.map(l => l.name);
+
+            const labelToStatus = {
+              'agent-ready': 'Ready',
+              'agent-in-progress': 'In progress',
+              'agent-blocked': 'Blocked',
+              'agent-review': 'In review',
+            };
+
+            let targetStatus = null;
+            if (issue.state === 'closed') {
+              targetStatus = 'Done';
+            } else {
+              for (const [label, status] of Object.entries(labelToStatus)) {
+                if (labels.includes(label)) {
+                  targetStatus = status;
+                }
+              }
+            }
+
+            if (!targetStatus) return;
+
+            // Find the project item for this issue
+            const query = `query($owner: String!, $num: Int!) {
+              user(login: $owner) {
+                projectV2(number: $num) {
+                  id
+                  field(name: "Status") {
+                    ... on ProjectV2SingleSelectField {
+                      id
+                      options { id name }
+                    }
+                  }
+                  items(first: 100) {
+                    nodes {
+                      id
+                      content {
+                        ... on Issue { number }
+                      }
+                    }
+                  }
+                }
+              }
+            }`;
+
+            const result = await github.graphql(query, {
+              owner: process.env.PROJECT_OWNER,
+              num: parseInt(process.env.PROJECT_NUM),
+            });
+
+            const project = result.user.projectV2;
+            const field = project.field;
+            const option = field.options.find(o => o.name === targetStatus);
+            const item = project.items.nodes.find(
+              n => n.content && n.content.number === issue.number
+            );
+
+            if (!item || !option) return;
+
+            await github.graphql(`mutation($project: ID!, $item: ID!, $field: ID!, $value: String!) {
+              updateProjectV2ItemFieldValue(input: {
+                projectId: $project, itemId: $item,
+                fieldId: $field,
+                value: { singleSelectOptionId: $value }
+              }) { projectV2Item { id } }
+            }`, {
+              project: project.id,
+              item: item.id,
+              field: field.id,
+              value: option.id,
+            });
+
+            console.log(`Moved issue #${issue.number} → ${targetStatus}`);
+
+      - name: Auto-close issue on PR merge
+        if: github.event.pull_request.merged == true
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const body = context.payload.pull_request.body || '';
+            const matches = body.match(/[Cc]loses?\s+#(\d+)/g) || [];
+            for (const match of matches) {
+              const num = parseInt(match.match(/\d+/)[0]);
+              console.log(`PR merged — issue #${num} will be closed by GitHub automatically`);
+            }
