@@ -40,4 +40,5 @@ where = ["src"]
 nsys_tui = ["templates/*.html"]
 
 [tool.bandit]
-skips = ["B110", "B608"]
+# B110: try_except_pass; B608: param to run(); B404/B603: subprocess in profile.py for nsys export (.nsys-rep→.sqlite), list args only, no shell
+skips = ["B110", "B608", "B404", "B603"]
