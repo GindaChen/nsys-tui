@@ -10,6 +10,7 @@ Usage:
     nsys-ai perfetto profile.sqlite --gpu 0 --trim 39 42
 """
 import json
+import os
 import threading
 import webbrowser
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -21,9 +22,11 @@ from .export import gpu_trace
 
 # ── Shared helpers ───────────────────────────────────────────────
 
-def _run_server(server, url, open_url, prof):
+def _run_server(server, url, open_url, prof, port: int):
     """Run an HTTPServer with browser-open and graceful shutdown."""
     print(f"Serving at {url}")
+    if os.environ.get("SSH_CONNECTION"):
+        print(f"  Remote/SSH: on your local machine run:  ssh -L {port}:127.0.0.1:{port} <host>  then open the URL in your local browser.")
     print("Press Ctrl-C to stop.")
     if open_url:
         threading.Timer(0.3, webbrowser.open, args=(open_url,)).start()
@@ -61,7 +64,7 @@ def serve(prof, device: int, trim: tuple[int, int], *,
 
     server = HTTPServer(("127.0.0.1", port), _ViewerHandler)
     url = f"http://127.0.0.1:{port}"
-    _run_server(server, url, url if open_browser else None, prof)
+    _run_server(server, url, url if open_browser else None, prof, port)
 
 
 # ── Mode 2: Horizontal timeline viewer ──────────────────────────
@@ -75,7 +78,7 @@ def serve_timeline(prof, device: int, trim: tuple[int, int], *,
     server = HTTPServer(("127.0.0.1", port), _ViewerHandler)
     url = f"http://127.0.0.1:{port}"
     print(f"Timeline viewer at {url}")
-    _run_server(server, url, url if open_browser else None, prof)
+    _run_server(server, url, url if open_browser else None, prof, port)
 
 
 # ── Mode 2: Perfetto UI ─────────────────────────────────────────
@@ -125,4 +128,4 @@ def serve_perfetto(prof, device: int, trim: tuple[int, int], *,
 
     print(f"Perfetto UI: {perfetto_url}")
     _run_server(server, trace_url,
-                perfetto_url if open_browser else None, prof)
+                perfetto_url if open_browser else None, prof, port)

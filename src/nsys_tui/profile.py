@@ -276,13 +276,44 @@ class Profile:
         self.conn.close()
 
 
+def resolve_profile_path(path: str) -> str:
+    """
+    Return a path to a .sqlite profile. If path is .nsys-rep, export via
+    `nsys export --type sqlite` and return the path to the resulting .sqlite.
+    (NVIDIA Nsight Systems exporter: docs.nvidia.com/nsight-systems/nsys-exporter)
+    """
+    if not path.lower().endswith(".nsys-rep"):
+        return path
+    import subprocess
+    out = path[:-9] + ".sqlite"  # .nsys-rep -> .sqlite
+    try:
+        subprocess.run(
+            ["nsys", "export", "--type", "sqlite", "-o", out, "-f", "true", path],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        raise RuntimeError(
+            "Profile is .nsys-rep; conversion requires 'nsys' (NVIDIA Nsight Systems) on PATH. "
+            "Install Nsight Systems or export manually: nsys export --type sqlite -o out.sqlite <file.nsys-rep>"
+        )
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(
+            f"nsys export failed: {e.stderr or e.stdout or str(e)}. "
+            "Export manually: nsys export --type sqlite -o out.sqlite <file.nsys-rep>"
+        )
+    return out
+
+
 def open(path: str) -> Profile:
     """Open an Nsight Systems SQLite database."""
+    path = resolve_profile_path(path)
     # Heuristic: if the given path is an empty .sqlite stub but a sibling
     # file without the .sqlite suffix exists and is a non-empty SQLite DB,
     # prefer the sibling. This helps when users accidentally point nsys-ai
     # at a placeholder file instead of the real Nsight export.
-    if path.endswith(".sqlite") and not os.path.getsize(path):
+    if path.endswith(".sqlite") and os.path.exists(path) and not os.path.getsize(path):
         base = path[:-7]
         if os.path.exists(base) and os.path.getsize(base) > 0:
             path = base

@@ -17,6 +17,7 @@ Commands:
     viewer       <profile.sqlite> --gpu N --trim S E -o FILE     Generate interactive HTML viewer
     timeline-html <profile.sqlite> --gpu N --trim S E -o FILE    Generate horizontal timeline HTML
     web        <profile.sqlite> --gpu N --trim S E  Serve viewer in browser (local HTTP)
+    open       <profile> [--gpu N] [--trim S E]     One-click: Perfetto / web / TUI (auto-detect .sqlite|.nsys-rep)
     perfetto   <profile.sqlite> --gpu N --trim S E  Open in Perfetto UI (via local trace server)
     timeline-web <profile.sqlite> --gpu N --trim S E Horizontal timeline in browser
     tui        <profile.sqlite> --gpu N --trim S E  Terminal tree view
@@ -130,6 +131,17 @@ def main():
     _add_gpu_trim(p)
     p.add_argument("--port", type=int, default=8142, help="HTTP port (default: 8142)")
     p.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
+
+    # ── open ──
+    p = sub.add_parser("open", help="One-click open: pick Perfetto, web viewer, or TUI (auto .sqlite/.nsys-rep)")
+    p.add_argument("profile", help="Path to .sqlite or .nsys-rep file")
+    p.add_argument("--gpu", type=int, default=None, help="GPU device ID (default: first GPU in profile)")
+    p.add_argument("--trim", nargs=2, type=float, metavar=("START_S", "END_S"), default=None,
+                   help="Time window in seconds (default: full profile)")
+    p.add_argument("--viewer", choices=["perfetto", "web", "tui"], default="perfetto",
+                   help="Viewer to use (default: perfetto)")
+    p.add_argument("--port", type=int, default=None, help="HTTP port for perfetto/web (default: 8143/8142)")
+    p.add_argument("--no-browser", action="store_true", help="Don't auto-open browser (perfetto/web)")
 
     # ── perfetto ──
     p = sub.add_parser("perfetto", help="Open trace in Perfetto UI")
@@ -246,20 +258,22 @@ def main():
         elif args.command == "export":
             from . import export
             prof = _profile.open(args.profile)
-            trim = _parse_trim(args)
-            os.makedirs(args.output, exist_ok=True)
-            gpus = [args.gpu] if args.gpu is not None else prof.meta.devices
-            for gpu in gpus:
-                events = export.gpu_trace(prof, gpu, trim)
-                if not events:
-                    print(f"GPU {gpu}: no kernels, skipped")
-                    continue
-                out = os.path.join(args.output, f"trace_gpu{gpu}.json")
-                export.write_json(events, out)
-                nk = sum(1 for e in events if e.get("cat") == "gpu_kernel")
-                nn = sum(1 for e in events if e.get("cat") == "nvtx_projected")
-                print(f"GPU {gpu}: {nk} kernels, {nn} NVTX → {out}")
-            prof.close()
+            try:
+                trim = _parse_trim(args)
+                os.makedirs(args.output, exist_ok=True)
+                gpus = [args.gpu] if args.gpu is not None else prof.meta.devices
+                for gpu in gpus:
+                    events = export.gpu_trace(prof, gpu, trim)
+                    if not events:
+                        print(f"GPU {gpu}: no kernels, skipped")
+                        continue
+                    out = os.path.join(args.output, f"trace_gpu{gpu}.json")
+                    export.write_json(events, out)
+                    nk = sum(1 for e in events if e.get("cat") == "gpu_kernel")
+                    nn = sum(1 for e in events if e.get("cat") == "nvtx_projected")
+                    print(f"GPU {gpu}: {nk} kernels, {nn} NVTX → {out}")
+            finally:
+                prof.close()
 
         elif args.command == "search":
             from .search import (search_kernels, search_nvtx,
@@ -322,6 +336,24 @@ def main():
             write_timeline_html(prof, args.gpu, _parse_trim(args), args.output)
             print(f"Written to {args.output} ({os.path.getsize(args.output)//1024} KB)")
             prof.close()
+
+        elif args.command == "open":
+            from .web import serve, serve_perfetto
+            from .tui import run_tui
+            prof = _profile.open(args.profile)
+            gpu = args.gpu if args.gpu is not None else (prof.meta.devices[0] if prof.meta.devices else 0)
+            if args.trim:
+                trim_ns = (int(args.trim[0] * 1e9), int(args.trim[1] * 1e9))
+            else:
+                trim_ns = (int(prof.meta.time_range[0]), int(prof.meta.time_range[1]))
+            port = args.port if args.port is not None else (8143 if args.viewer == "perfetto" else 8142)
+            if args.viewer == "perfetto":
+                serve_perfetto(prof, gpu, trim_ns, port=port, open_browser=not args.no_browser)
+            elif args.viewer == "web":
+                serve(prof, gpu, trim_ns, port=port, open_browser=not args.no_browser)
+            else:
+                prof.close()
+                run_tui(prof.path, gpu, trim_ns, max_depth=-1, min_ms=0)
 
         elif args.command == "web":
             from .web import serve
