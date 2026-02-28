@@ -5,7 +5,9 @@ Provides a thin wrapper around the SQLite export with typed accessors
 for kernels, NVTX events, CUDA runtime calls, and metadata.
 """
 import os
+import shutil
 import sqlite3
+import subprocess  # nosec B404 — only for nsys export .nsys-rep→.sqlite, list args no shell
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List
 
@@ -276,13 +278,72 @@ class Profile:
         self.conn.close()
 
 
+def resolve_profile_path(path: str) -> str:
+    """
+    Return a path to a .sqlite profile. If path is .nsys-rep, export via
+    `nsys export --type sqlite` and return the path to the resulting .sqlite.
+    (NVIDIA Nsight Systems exporter: docs.nvidia.com/nsight-systems/nsys-exporter)
+    """
+    if not path.lower().endswith(".nsys-rep"):
+        return path
+
+    # Reuse an existing up-to-date SQLite export if possible.
+    out = path[:-9] + ".sqlite"  # .nsys-rep -> .sqlite
+    if (
+        os.path.exists(path)
+        and os.path.exists(out)
+        and os.path.getsize(out) > 0
+        and os.path.getmtime(out) >= os.path.getmtime(path)
+    ):
+        return out
+
+    nsys_exe = shutil.which("nsys")
+    if not nsys_exe:
+        raise RuntimeError(
+            "Profile is .nsys-rep; conversion requires 'nsys' (NVIDIA Nsight Systems) on PATH. "
+            "Install Nsight Systems or export manually: nsys export --type sqlite -o <out.sqlite> --force-overwrite true <file.nsys-rep>"
+        )
+
+    try:
+        # path/out passed as list args to nsys, no shell; caller-controlled paths only
+        result = subprocess.run(  # nosec B603
+            [nsys_exe, "export", "--type=sqlite", "-o", out, "--force-overwrite=true", path],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            "nsys export timed out after 300 seconds. This may indicate that nsys is waiting "
+            "for interactive input (for example, a license prompt) or that the .nsys-rep file "
+            "is corrupted. Try running the export manually to see the full output:\n"
+            f"  nsys export --type sqlite -o {out} {path}\n"
+        )
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(
+            f"nsys export failed: {e.stderr or e.stdout or str(e)}. "
+            "Export manually: nsys export --type sqlite -o <out.sqlite> --force-overwrite true <file.nsys-rep>"
+        )
+    if not (os.path.exists(out) and os.path.getsize(out) > 0):
+        stdout = getattr(result, "stdout", None) or "(empty)"
+        stderr = getattr(result, "stderr", None) or "(empty)"
+        raise RuntimeError(
+            f"nsys export completed without error but did not produce a usable SQLite file at '{out}'. "
+            "This may indicate that nsys wrote output elsewhere or hit an unexpected condition.\n"
+            f"nsys stdout:\n{stdout}\nnsys stderr:\n{stderr}"
+        )
+    return out
+
+
 def open(path: str) -> Profile:
     """Open an Nsight Systems SQLite database."""
+    path = resolve_profile_path(path)
     # Heuristic: if the given path is an empty .sqlite stub but a sibling
     # file without the .sqlite suffix exists and is a non-empty SQLite DB,
     # prefer the sibling. This helps when users accidentally point nsys-ai
     # at a placeholder file instead of the real Nsight export.
-    if path.endswith(".sqlite") and not os.path.getsize(path):
+    if path.endswith(".sqlite") and os.path.exists(path) and not os.path.getsize(path):
         base = path[:-7]
         if os.path.exists(base) and os.path.getsize(base) > 0:
             path = base

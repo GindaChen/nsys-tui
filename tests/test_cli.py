@@ -23,6 +23,7 @@ def test_subcommands():
     result = subprocess.run(
         [sys.executable, "-m", "nsys_tui", "--help"],
         capture_output=True, text=True)
-    for cmd in ['info', 'analyze', 'summary', 'overlap', 'tree', 'tui', 'timeline',
-                'search', 'export', 'viewer', 'timeline-html', 'web', 'perfetto', 'timeline-web']:
+    for cmd in ['info', 'analyze', 'open', 'summary', 'overlap', 'nccl', 'iters', 'tree', 'markdown',
+                'search', 'export-csv', 'export-json', 'export', 'viewer', 'timeline-html',
+                'web', 'perfetto', 'timeline-web', 'tui', 'timeline']:
         assert cmd in result.stdout, f"Missing subcommand: {cmd}"
