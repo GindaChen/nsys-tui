@@ -16,7 +16,7 @@ _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 def _load_template(name: str) -> Template:
     """Load an HTML template from the templates directory."""
     path = os.path.join(_TEMPLATE_DIR, name)
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return Template(f.read())
 
 
@@ -41,7 +41,7 @@ def generate_html(prof, device: int, trim: tuple[int, int]) -> str:
 
 def write_html(prof, device: int, trim: tuple[int, int], path: str):
     """Generate and write the HTML viewer to a file."""
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(generate_html(prof, device, trim))
 
 
@@ -66,5 +66,5 @@ def generate_timeline_html(prof, device: int, trim: tuple[int, int]) -> str:
 
 def write_timeline_html(prof, device: int, trim: tuple[int, int], path: str):
     """Generate and write the timeline HTML viewer to a file."""
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(generate_timeline_html(prof, device, trim))

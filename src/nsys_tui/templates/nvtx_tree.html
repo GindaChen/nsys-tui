@@ -1005,7 +1005,31 @@
 
         // ══════════════ NVTX Scoping ══════════════
         function toggleScopeBar() { const bar = document.getElementById('scopeBar'); const show = bar.style.display === 'none'; bar.style.display = show ? 'flex' : 'none'; document.getElementById('scopeToggle').classList.toggle('active', show); if (show) populateScope(); updateScopeUI() }
-        function populateScope() { const sel = document.getElementById('scopeSelect'); sel.innerHTML = '<option value="">All regions</option>'; const nvtx = getTopNVTX(DATA, 2); nvtx.forEach((n, i) => { const label = escHtml(n.name) + ' (' + fmtDur(n.duration_ms) + ')'; sel.innerHTML += '<option value="' + i + '" title="' + escHtml(label) + '">' + label + '</option>' }); if (scopePath) { const idx = nvtx.findIndex(n => n.path === scopePath); if (idx >= 0) sel.value = String(idx) } updateScopeUI() }
+        function populateScope() {
+            const sel = document.getElementById('scopeSelect');
+            const nvtx = getTopNVTX(DATA, 2);
+
+            // Build options using DOM APIs (avoid quoting/HTML injection issues).
+            const optAll = document.createElement('option');
+            optAll.value = '';
+            optAll.textContent = 'All regions';
+            sel.replaceChildren(optAll);
+
+            nvtx.forEach((n, i) => {
+                const label = String(n.name) + ' (' + fmtDur(n.duration_ms) + ')';
+                const opt = document.createElement('option');
+                opt.value = String(i);
+                opt.textContent = label;
+                opt.title = label;
+                sel.appendChild(opt);
+            });
+
+            if (scopePath) {
+                const idx = nvtx.findIndex(n => n.path === scopePath);
+                if (idx >= 0) sel.value = String(idx);
+            }
+            updateScopeUI();
+        }
         function updateScopeUI() { const bar = document.getElementById('scopeBar'); const sel = document.getElementById('scopeSelect'); const clearBtn = document.getElementById('scopeClearBtn'); const hasScope = sel.value !== ''; bar.classList.toggle('scope-bar--active', hasScope); clearBtn.style.display = hasScope ? '' : 'none'; sel.title = sel.selectedIndex >= 0 ? (sel.options[sel.selectedIndex].title || sel.options[sel.selectedIndex].textContent) : ''; document.getElementById('scopeToggle').classList.toggle('has-scope', scopeActive) }
         function applyScope() { const sel = document.getElementById('scopeSelect'); const idx = sel.value; if (idx === '') { scopedData = null; scopeActive = false; scopePath = null } else { const nvtx = getTopNVTX(DATA, 2); const chosen = nvtx[parseInt(idx)]; scopePath = chosen.path; scopedData = findSubtree(DATA, chosen.path); scopeActive = true } updateScopeUI(); refreshCurrentView() }
         function clearScope() { document.getElementById('scopeSelect').value = ''; scopedData = null; scopeActive = false; scopePath = null; updateScopeUI(); refreshCurrentView() }

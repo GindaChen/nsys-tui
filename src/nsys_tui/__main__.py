@@ -13,8 +13,8 @@ Commands:
     export-csv <profile.sqlite> --gpu N --trim S E  Export flat CSV
     export-json <profile.sqlite> --gpu N --trim S E Export flat JSON
     export     <profile.sqlite> [--gpu N] -o DIR    Export Perfetto JSON traces
-    viewer       <profile.sqlite> --gpu N -o FILE     Generate interactive HTML viewer
-    timeline-html <profile.sqlite> --gpu N -o FILE    Generate horizontal timeline HTML
+    viewer       <profile.sqlite> --gpu N --trim S E -o FILE     Generate interactive HTML viewer
+    timeline-html <profile.sqlite> --gpu N --trim S E -o FILE    Generate horizontal timeline HTML
     web        <profile.sqlite> --gpu N --trim S E  Serve viewer in browser (local HTTP)
     perfetto   <profile.sqlite> --gpu N --trim S E  Open in Perfetto UI (via local trace server)
     timeline-web <profile.sqlite> --gpu N --trim S E Horizontal timeline in browser
