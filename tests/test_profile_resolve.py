@@ -45,7 +45,14 @@ def test_resolve_nsys_rep_success(monkeypatch, tmp_path: Path):
     rep.write_bytes(b"0")
     out = profile_mod.resolve_profile_path(str(rep))
     assert out.endswith(".sqlite")
-    assert calls["args"][0] == "/opt/nsys"
+    args = calls["args"]
+    assert args[0] == "/opt/nsys"
+    assert any("overwrite" in a for a in args)
+    assert "-o" in args
+    o_idx = args.index("-o")
+    assert o_idx + 1 < len(args)
+    assert args[o_idx + 1] == out
+    assert str(rep) in args
 
 
 def test_resolve_nsys_rep_failure(monkeypatch, tmp_path: Path):

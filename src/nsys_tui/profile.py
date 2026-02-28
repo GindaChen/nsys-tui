@@ -290,7 +290,8 @@ def resolve_profile_path(path: str) -> str:
     # Reuse an existing up-to-date SQLite export if possible.
     out = path[:-9] + ".sqlite"  # .nsys-rep -> .sqlite
     if (
-        os.path.exists(out)
+        os.path.exists(path)
+        and os.path.exists(out)
         and os.path.getsize(out) > 0
         and os.path.getmtime(out) >= os.path.getmtime(path)
     ):
@@ -300,13 +301,13 @@ def resolve_profile_path(path: str) -> str:
     if not nsys_exe:
         raise RuntimeError(
             "Profile is .nsys-rep; conversion requires 'nsys' (NVIDIA Nsight Systems) on PATH. "
-            "Install Nsight Systems or export manually: nsys export --type sqlite -o out.sqlite <file.nsys-rep>"
+            "Install Nsight Systems or export manually: nsys export --type sqlite -o <out.sqlite> --force-overwrite true <file.nsys-rep>"
         )
 
     try:
         # path/out passed as list args to nsys, no shell; arguments are controlled by the caller.
         subprocess.run(
-            [nsys_exe, "export", "--type", "sqlite", "-o", out, "-f", "true", path],
+            [nsys_exe, "export", "--type", "sqlite", "-o", out, "--force-overwrite", "true", path],
             check=True,
             capture_output=True,
             text=True,
@@ -322,7 +323,7 @@ def resolve_profile_path(path: str) -> str:
     except subprocess.CalledProcessError as e:
         raise RuntimeError(
             f"nsys export failed: {e.stderr or e.stdout or str(e)}. "
-            "Export manually: nsys export --type sqlite -o out.sqlite <file.nsys-rep>"
+            "Export manually: nsys export --type sqlite -o <out.sqlite> --force-overwrite true <file.nsys-rep>"
         )
     return out
 
