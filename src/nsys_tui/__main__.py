@@ -411,45 +411,47 @@ def main():
             from .tui_timeline import run_timeline
             run_timeline(args.profile, args.gpu, _parse_trim(args),
                          min_ms=args.min_ms)
+
+        elif args.command == "skill":
+            from .skills.registry import list_skills, all_skills, run_skill as _run_skill
+            if args.skill_action == "list":
+                skills = all_skills()
+                print(f"{'Name':<25s}  {'Category':<15s}  Description")
+                print("─" * 80)
+                for s in skills:
+                    print(f"{s.name:<25s}  {s.category:<15s}  {s.description[:60]}")
+            elif args.skill_action == "run":
+                import sqlite3
+                conn = sqlite3.connect(args.profile)
+                try:
+                    print(_run_skill(args.skill_name, conn))
+                finally:
+                    conn.close()
+            else:
+                parser.parse_args(["skill", "--help"])
+
+        elif args.command == "agent":
+            from .agent.loop import Agent
+            if args.agent_action == "analyze":
+                agent = Agent(args.profile)
+                try:
+                    print(agent.analyze())
+                finally:
+                    agent.close()
+            elif args.agent_action == "ask":
+                agent = Agent(args.profile)
+                try:
+                    print(agent.ask(args.question))
+                finally:
+                    agent.close()
+            else:
+                parser.parse_args(["agent", "--help"])
+
     except RuntimeError as e:
         # Surface schema/validation issues without a full Python traceback.
         print(f"Error: {e}")
 
-    elif args.command == "skill":
-        from .skills.registry import list_skills, all_skills, run_skill as _run_skill
-        if args.skill_action == "list":
-            skills = all_skills()
-            print(f"{'Name':<25s}  {'Category':<15s}  Description")
-            print("─" * 80)
-            for s in skills:
-                print(f"{s.name:<25s}  {s.category:<15s}  {s.description[:60]}")
-        elif args.skill_action == "run":
-            import sqlite3
-            conn = sqlite3.connect(args.profile)
-            try:
-                print(_run_skill(args.skill_name, conn))
-            finally:
-                conn.close()
-        else:
-            parser.parse_args(["skill", "--help"])
-
-    elif args.command == "agent":
-        from .agent.loop import Agent
-        if args.agent_action == "analyze":
-            agent = Agent(args.profile)
-            try:
-                print(agent.analyze())
-            finally:
-                agent.close()
-        elif args.agent_action == "ask":
-            agent = Agent(args.profile)
-            try:
-                print(agent.ask(args.question))
-            finally:
-                agent.close()
-        else:
-            parser.parse_args(["agent", "--help"])
-
 
 if __name__ == "__main__":
     main()
+
