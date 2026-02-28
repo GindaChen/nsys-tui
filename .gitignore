@@ -14,3 +14,7 @@ megatron_viewer_test.html
 nvtx_viewer.html
 timeline_test.html
 timeline_viewer.html
+
+*.sqlite
+*.nsys-rep
+examples/*/output/

@@ -168,9 +168,36 @@ def main():
     _add_gpu_trim(p)
     p.add_argument("--min-ms", type=float, default=0, help="Min duration to show (ms)")
 
+    # ── skill ──
+    p = sub.add_parser("skill", help="List or run analysis skills")
+    skill_sub = p.add_subparsers(dest="skill_action")
+    skill_sub.add_parser("list", help="List all available skills")
+    sp_run = skill_sub.add_parser("run", help="Run a skill against a profile")
+    sp_run.add_argument("skill_name", help="Name of the skill to run")
+    sp_run.add_argument("profile", help="Path to .sqlite file")
+
+    # ── agent ──
+    p = sub.add_parser("agent", help="AI agent for profile analysis")
+    agent_sub = p.add_subparsers(dest="agent_action")
+    sp_analyze = agent_sub.add_parser("analyze", help="Full auto-analysis report")
+    sp_analyze.add_argument("profile", help="Path to .sqlite file")
+    sp_ask = agent_sub.add_parser("ask", help="Ask a question about a profile")
+    sp_ask.add_argument("profile", help="Path to .sqlite file")
+    sp_ask.add_argument("question", help="Natural language question")
+
+    # ── help ──
+    sub.add_parser("help", help="Show getting-started guide and available commands")
+
     args = parser.parse_args()
     if not args.command:
-        parser.print_help()
+        # No args → launch interactive TUI main page
+        from .main_page import run_main_page
+        run_main_page()
+        return
+
+    if args.command == "help":
+        from .main_page import show_help
+        show_help()
         return
 
     # Import here to avoid slow startup for --help
@@ -387,6 +414,41 @@ def main():
     except RuntimeError as e:
         # Surface schema/validation issues without a full Python traceback.
         print(f"Error: {e}")
+
+    elif args.command == "skill":
+        from .skills.registry import list_skills, all_skills, run_skill as _run_skill
+        if args.skill_action == "list":
+            skills = all_skills()
+            print(f"{'Name':<25s}  {'Category':<15s}  Description")
+            print("─" * 80)
+            for s in skills:
+                print(f"{s.name:<25s}  {s.category:<15s}  {s.description[:60]}")
+        elif args.skill_action == "run":
+            import sqlite3
+            conn = sqlite3.connect(args.profile)
+            try:
+                print(_run_skill(args.skill_name, conn))
+            finally:
+                conn.close()
+        else:
+            parser.parse_args(["skill", "--help"])
+
+    elif args.command == "agent":
+        from .agent.loop import Agent
+        if args.agent_action == "analyze":
+            agent = Agent(args.profile)
+            try:
+                print(agent.analyze())
+            finally:
+                agent.close()
+        elif args.agent_action == "ask":
+            agent = Agent(args.profile)
+            try:
+                print(agent.ask(args.question))
+            finally:
+                agent.close()
+        else:
+            parser.parse_args(["agent", "--help"])
 
 
 if __name__ == "__main__":

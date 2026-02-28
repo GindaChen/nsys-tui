@@ -9,7 +9,7 @@ This document is the onboarding guide for AI agents working on `nsys-ai`.
 ```
 nsys-ai/
 ├── src/nsys_tui/          # Main Python package
-│   ├── __main__.py        # CLI entry point (click-based)
+│   ├── __main__.py        # CLI entry point (argparse-based)
 │   ├── profile.py         # SQLite profile loader
 │   ├── tui.py             # Tree TUI (curses)
 │   ├── tui_timeline.py    # Timeline TUI (curses)
@@ -22,13 +22,22 @@ nsys-ai/
 │   ├── projection.py      # Time-range projection
 │   ├── viewer.py          # Perfetto JSON export
 │   ├── web.py             # Flask web UI server
-│   ├── ai/                # AI module (commentary, suggestions)
+│   ├── skills/            # 🧩 Analysis skill system
+│   │   ├── base.py        # Skill dataclass + execution
+│   │   ├── registry.py    # Auto-discovery + lookup
+│   │   └── builtins/      # 8 built-in SQL skills
+│   ├── agent/             # 🤖 AI agent
+│   │   ├── persona.py     # System prompt + identity
+│   │   └── loop.py        # Analysis loop + skill selection
+│   ├── ai/                # AI module (NVTX annotation, convergence)
 │   └── templates/         # HTML templates (Jinja2)
 ├── tests/                 # pytest test suite
-│   └── test_cli.py        # CLI smoke tests
-├── docs/                  # Documentation (8 guides)
+├── docs/                  # Documentation (8 guides + root causes)
+│   ├── root-causes/       # 📖 Book of Root Causes
+│   └── sqlite-explorer/   # Interactive schema explorer
+├── agent/                 # Agent design docs (not code)
 ├── site/                  # GitHub Pages landing page
-├── examples/              # Example HTML exports
+├── examples/              # Example profiles + download scripts
 ├── pyproject.toml         # Package config (setuptools)
 ├── ROADMAP.md             # Prioritized roadmap with issue links
 └── .github/workflows/

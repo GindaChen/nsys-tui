@@ -642,6 +642,44 @@
         </div>
     </section>
 
+    <section class="quickstart" style="padding: 0 0 60px;">
+        <div class="container">
+            <h2 style="font-size: 2rem; font-weight: 700; text-align: center; margin-bottom: 12px;">🚀 Try It Now</h2>
+            <p style="text-align: center; color: var(--text-dim); margin-bottom: 32px;">Get started in 60 seconds with a
+                real GPU training profile</p>
+            <div class="terminal" style="max-width: 780px; margin: 0 auto;">
+                <div class="terminal-bar">
+                    <div class="terminal-dot r"></div>
+                    <div class="terminal-dot y"></div>
+                    <div class="terminal-dot g"></div>
+                    <span class="terminal-title">Quick Start — Example 20: Megatron-LM DistCA</span>
+                </div>
+                <div class="terminal-body"><span class="t-dim"># 1. Install</span>
+                    <span class="t-green">$</span> pip install nsys-ai
+
+                    <span class="t-dim"># 2. Clone & download a real profile (~700 MB)</span>
+                    <span class="t-green">$</span> git clone https://github.com/GindaChen/nsys-ai && cd nsys-ai
+                    <span class="t-green">$</span> cd examples/example-20-megatron-distca
+                    <span class="t-green">$</span> python download_data.py
+
+                    <span class="t-dim"># 3. Explore — profile overview</span>
+                    <span class="t-green">$</span> nsys-ai info output/megatron_distca.sqlite
+
+                    <span class="t-dim"># 4. Interactive timeline TUI (the main attraction!)</span>
+                    <span class="t-green">$</span> nsys-ai timeline output/megatron_distca.sqlite --gpu 4 --trim 39 42
+
+                    <span class="t-dim"># 5. Web viewer — opens in browser</span>
+                    <span class="t-green">$</span> nsys-ai web output/megatron_distca.sqlite --gpu 4 --trim 39 42
+                </div>
+            </div>
+        </div>
+        <p style="text-align: center; color: var(--text-dim); margin-top: 20px; font-size: 0.9rem;">
+            See all examples → <a href="https://github.com/GindaChen/nsys-ai/tree/main/examples"
+                style="color: var(--accent); text-decoration: none;">examples/</a>
+        </p>
+        </div>
+    </section>
+
     <section class="features">
         <div class="container">
             <div class="features-grid">

@@ -2,9 +2,11 @@
 
 # 🔬 nsys-ai
 
-**Terminal UI for NVIDIA Nsight Systems profiles**
+**AI-powered analysis for NVIDIA Nsight Systems profiles**
 
-Navigate GPU kernel timelines, explore NVTX hierarchies, and analyze performance — all from your terminal.
+Navigate GPU kernel timelines, diagnose performance bottlenecks with AI, and explore NVTX hierarchies — all from your terminal.
+
+> **Mission:** Build an intelligent agent that truly understands GPU performance from first principles. An agent that can identify pipeline bubbles, calculate MFU, assess arithmetic intensity, and diagnose the root causes that cost millions of dollars in GPU hours — turning months of expert debugging into minutes.
 
 [![CI](https://github.com/GindaChen/nsys-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/GindaChen/nsys-ai/actions)
 [![PyPI](https://img.shields.io/pypi/v/nsys-ai)](https://pypi.org/project/nsys-ai/)
@@ -91,9 +93,14 @@ Interactive HTML exports:<br>
 ### 1. Get a profile
 
 ```bash
-# Profile your PyTorch training
+# Option A: Profile your own PyTorch training
 nsys profile -o my_training python train.py
 # → produces my_training.sqlite
+
+# Option B: Download an example profile
+cd examples/example-20-megatron-distca
+python download_data.py
+# → downloads output/megatron_distca.sqlite
 ```
 
 ### 2. Explore it
@@ -218,6 +225,62 @@ The [`docs/sqlite-explorer/`](docs/sqlite-explorer/) contains an **interactive H
 | `export-json` | Flat JSON for scripting |
 | `viewer` | Interactive HTML report |
 | `markdown` | NVTX hierarchy as markdown |
+
+---
+
+## 🧩 Skills (Analysis Building Blocks)
+
+nsys-ai ships with 8 built-in SQL skills — self-contained analysis units that work without any LLM:
+
+```bash
+# List all available skills
+nsys-ai skill list
+
+# Run a specific skill
+nsys-ai skill run top_kernels profile.sqlite
+nsys-ai skill run gpu_idle_gaps profile.sqlite
+nsys-ai skill run nccl_breakdown profile.sqlite
+```
+
+| Skill | What it does |
+|-------|-------------|
+| `top_kernels` | Heaviest GPU kernels by total time |
+| `memory_transfers` | H2D/D2H/D2D transfer breakdown |
+| `nvtx_kernel_map` | NVTX annotation → kernel mapping |
+| `gpu_idle_gaps` | Pipeline bubbles between kernels |
+| `nccl_breakdown` | NCCL collective operation summary |
+| `kernel_launch_overhead` | CPU→GPU dispatch latency |
+| `thread_utilization` | CPU thread bottleneck detection |
+| `schema_inspect` | Database tables and columns |
+
+Skills are extensible — add your own by creating a Python file that exports a `SKILL` constant.
+
+---
+
+## 🤖 AI Agent
+
+The agent is a CUDA ML systems expert that runs skills automatically and diagnoses problems:
+
+```bash
+# Full auto-analysis
+nsys-ai agent analyze profile.sqlite
+
+# Ask a specific question
+nsys-ai agent ask profile.sqlite "why are there bubbles in the pipeline?"
+nsys-ai agent ask profile.sqlite "is NCCL overlapping with compute?"
+```
+
+With `pip install nsys-ai[agent]`, the agent can use an LLM to synthesize natural language analysis from skill results.
+
+---
+
+## 📦 Install Tiers
+
+```bash
+pip install nsys-ai          # Core: CLI + TUI + skills (no dependencies!)
+pip install nsys-ai[agent]   # + LLM-backed agent analysis (requires anthropic)
+pip install nsys-ai[all]     # Everything
+```
 
 ---
 

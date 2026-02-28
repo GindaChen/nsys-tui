@@ -30,8 +30,10 @@ nsys-ai = "nsys_tui.__main__:main"
 nsys-tui = "nsys_tui.__main__:main"
 
 [project.optional-dependencies]
-ai = ["anthropic>=0.20.0"]
+agent = ["anthropic>=0.20.0"]
+ai = ["anthropic>=0.20.0"]  # backward compat alias
 dev = ["pytest>=7.0"]
+all = ["nsys-ai[agent]"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

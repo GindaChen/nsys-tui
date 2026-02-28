@@ -70,6 +70,26 @@ Two pillars: **UI** (making profiles effortless to view) and **AI** (making prof
 
 ---
 
+## 🧠 Pillar 3 — Agent & Skills
+
+> An intelligent agent that uses standardized SQL skills to diagnose GPU performance problems from first principles.
+
+**Skills Foundation** — 8 built-in SQL skills: `top_kernels`, `memory_transfers`, `nvtx_kernel_map`, `gpu_idle_gaps`, `nccl_breakdown`, `kernel_launch_overhead`, `thread_utilization`, `schema_inspect`. User-extensible skill registry.
+
+**Agent Persona** — CUDA ML systems expert with deep knowledge of nsys, Megatron, SGLang, vLLM. Follows evidence-based analysis: orient → identify → hypothesize → investigate → diagnose → recommend → verify.
+
+**Book of Root Causes** — Living document of GPU performance problems. Quick-reference table, 10 detailed root cause writeups, and 38 veteran diagnostic questions.
+
+**Benchmarking Problems** (planned):
+1. Identifying pipeline "bubbles" and stalls
+2. Calculating Model Flops Utilization (MFU)
+3. Determining if kernels achieve ideal arithmetic intensity for a given GPU
+4. Analyzing network overlap and bandwidth vs. compute-communication balance
+5. Investigating module loading or kernel compilation elongating forward/backward passes
+6. Assessing how memory/GC affects performance
+
+---
+
 ## ✅ Shipped
 
 - [x] Timeline TUI (v0.1.0)
@@ -79,3 +99,7 @@ Two pillars: **UI** (making profiles effortless to view) and **AI** (making prof
 - [x] Web UI server — `nsys-ai web` (v0.2.0)
 - [x] AI module — auto-commentary, NVTX suggestions, bottleneck detection (v0.1.0)
 - [x] PyPI package as `nsys-ai` (v0.2.1)
+- [x] Agent skill system — 8 built-in SQL skills + registry + CLI (v0.3.0)
+- [x] Agent persona + analysis loop — `nsys-ai agent analyze|ask` (v0.3.0)
+- [x] Book of Root Causes — quick-ref, long-form, veteran questions (v0.3.0)
+- [x] Modular packaging — `[agent]`, `[all]` extras (v0.3.0)
