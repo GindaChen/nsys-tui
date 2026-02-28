@@ -27,14 +27,12 @@ def _nvtx_hierarchy_summary(prof: Profile, device: int, trim: tuple[int, int]) -
     if not roots:
         return "NVTX hierarchy: (none or no kernels in trim window)"
     lines = ["NVTX hierarchy (top-level regions)"]
-    total_ms = 0
     for node in roots:
         dur_ms = (node["end"] - node["start"]) / 1e6
-        total_ms += dur_ms
         lines.append(f"  {node['name']}: {dur_ms:.1f}ms")
     nvtx_count = sum(1 for n in _walk_nodes(roots) if n.get("type") == "nvtx")
     kern_count = sum(1 for n in _walk_nodes(roots) if n.get("type") == "kernel")
-    lines.append(f"  (total {len(roots)} top-level, {nvtx_count} NVTX, {kern_count} kernels, {total_ms:.1f}ms)")
+    lines.append(f"  ({len(roots)} top-level, {nvtx_count} NVTX, {kern_count} kernels)")
     return "\n".join(lines)
 
 
