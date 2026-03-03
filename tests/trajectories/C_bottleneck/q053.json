@@ -1,0 +1,29 @@
+{
+  "id": "q053",
+  "version": 1,
+  "suite": "agent-bottleneck",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Find the longest contiguous block of purely compute kernels (no memory/NCCL).",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Find the longest contiguous block of purely compute kernels (no memory/NCCL)."
+    }
+  },
+  "raw_answer": "I'm sorry, I cannot fulfill that request. The available profile database schema does not contain information about kernel types (compute, memory, NCCL) or provide a mechanism to identify contiguous blocks of specific kernel types. Therefore, I cannot identify the longest contiguous block of purely compute kernels.",
+  "raw_actions": [],
+  "expected_tool_calls": [],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "id": "q105",
+  "version": 1,
+  "suite": "agent-analysis",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Is there a significant GPU idle time in this profile? What is the total idle duration and its percentage?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Is there a significant GPU idle time in this profile? What is the total idle duration and its percentage?"
+    }
+  },
+  "raw_answer": "The total duration of the profile, from the start of the first kernel to the end of the last kernel, is 36,123,330,565 nanoseconds (approximately 36.12 seconds).\n\nThe sum of the execution durations of all kernels in the profile is 149,474,005,462 nanoseconds (approximately 149.47 seconds).\n\nSince the total sum of kernel execution times (149.47 seconds) is significantly greater than the overall profile duration (36.12 seconds), this indicates a high degree of kernel concurrency and GPU utilization. This means that multiple kernels are often executing in parallel, either on different streams, contexts, or even different GPUs.\n\nTherefore, there is no significant GPU idle time in this profile. On the contrary, the GPU appears to be heavily utilized, processing many kernels concurrently, which results in a total execution time much larger than the wall-clock duration of the profile. A simple calculation of \"idle time\" by subtracting the total kernel time from the total profile duration would yield a negative value, which is not meaningful in the presence of concurrent execution.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL"
+      ],
+      "raw_sql_calls": [
+        "SELECT MIN(start), MAX(end) FROM CUPTI_ACTIVITY_KIND_KERNEL",
+        "SELECT SUM(end - start) FROM CUPTI_ACTIVITY_KIND_KERNEL"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

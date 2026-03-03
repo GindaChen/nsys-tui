@@ -1,0 +1,45 @@
+{
+  "id": "q037",
+  "version": 1,
+  "suite": "agent-iteration",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Where is the 10th iteration's forward pass start?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Where is the 10th iteration's forward pass start?"
+    }
+  },
+  "raw_answer": "I couldn't find an NVTX event for \"forward pass start\" in the profile database. It might be named differently or not be captured as an NVTX event.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 0,
+      "max_calls": 5,
+      "sql_fragments": [
+        "NVTX_EVENTS",
+        "STRINGIDS",
+        "ORDER BY",
+        "LIMIT",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "SELECT NVTX_EVENTS.start FROM NVTX_EVENTS LEFT JOIN StringIds ON NVTX_EVENTS.textId = StringIds.id WHERE NVTX_EVENTS.text LIKE '%forward pass start%' OR StringIds.value LIKE '%forward pass start%' ORDER BY NVTX_EVENTS.start LIMIT 1 OFFSET 9;"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

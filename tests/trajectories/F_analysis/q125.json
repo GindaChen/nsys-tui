@@ -1,0 +1,46 @@
+{
+  "id": "q125",
+  "version": 1,
+  "suite": "agent-analysis",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "If I wanted to reduce total training time by 20%, which kernels or operations should I target?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "If I wanted to reduce total training time by 20%, which kernels or operations should I target?"
+    }
+  },
+  "raw_answer": "To reduce total training time by 20%, you should focus on optimizing the following kernels, as they consume the most GPU time:\n\n1.  **flash_bwd_dq_dk_dv_loop_seqk_parallel_kernel**: This kernel accounts for approximately 39.81 seconds of GPU time with 420 calls.\n2.  **ncclDevKernel_AllGather_RING_LL**: This collective communication kernel runs for about 24.49 seconds across 2940 calls.\n3.  **ncclDevKernel_ReduceScatter_Sum_bf16_RING_LL**: Another collective communication kernel, taking about 14.00 seconds over 1890 calls.\n4.  **nvjet_tst_128x320_64x3_2x1_v_bz_coopB_NNN**: This kernel uses approximately 13.92 seconds of GPU time across 1785 calls.\n5.  **flash_fwd_kernel**: This kernel contributes about 13.08 seconds to the total GPU time with 420 calls.\n\nOptimizing these kernels, especially the `flash_bwd_dq_dk_dv_loop_seqk_parallel_kernel` and the NCCL communication kernels, will yield the most significant improvements in overall training time.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "STRINGIDS",
+        "ORDER BY",
+        "LIMIT"
+      ],
+      "raw_sql_calls": [
+        "SELECT StringIds.value AS kernel_name, SUM(CUPTI_ACTIVITY_KIND_KERNEL.end - CUPTI_ACTIVITY_KIND_KERNEL.start) / 1e9 AS total_duration_s, COUNT(*) AS call_count FROM CUPTI_ACTIVITY_KIND_KERNEL JOIN StringIds ON CUPTI_ACTIVITY_KIND_KERNEL.shortName = StringIds.id GROUP BY kernel_name ORDER BY total_duration_s DESC LIMIT 5"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [
+      "flash_bwd_dq_dk_dv_loop_seqk_parallel_kernel"
+    ],
+    "must_not_contain": []
+  }
+}

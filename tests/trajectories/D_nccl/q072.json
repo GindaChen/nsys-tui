@@ -1,0 +1,36 @@
+{
+  "id": "q072",
+  "version": 1,
+  "suite": "agent-nccl",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Where is the first tensor parallel AllReduce?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Where is the first tensor parallel AllReduce?"
+    }
+  },
+  "raw_answer": "",
+  "raw_actions": [
+    {
+      "type": "navigate_to_kernel",
+      "target_name": "AllReduce",
+      "occurrence_index": 1,
+      "reason": "Navigating to the first occurrence of the AllReduce kernel as requested."
+    }
+  ],
+  "expected_tool_calls": [],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

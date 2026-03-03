@@ -1,0 +1,45 @@
+{
+  "id": "q048",
+  "version": 1,
+  "suite": "agent-bottleneck",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Take me to the slowest ncclDevKernel_AllGather call.",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Take me to the slowest ncclDevKernel_AllGather call."
+    }
+  },
+  "raw_answer": "I couldn't find any kernels named 'ncclDevKernel_AllGather' in the profile. Please check for typos or provide a different kernel name.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 0,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "STRINGIDS",
+        "ORDER BY",
+        "LIMIT",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "\nSELECT\n  T1.start,\n  T1.end,\n  (T1.end - T1.start) AS duration_ns,\n  T2.value AS kernelName\nFROM\n  CUPTI_ACTIVITY_KIND_KERNEL AS T1\nJOIN\n  StringIds AS T2\nON\n  T1.demangledName = T2.id\nWHERE\n  T2.value = 'ncclDevKernel_AllGather'\nORDER BY\n  duration_ns DESC\nLIMIT 1;\n"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

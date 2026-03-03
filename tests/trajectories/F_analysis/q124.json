@@ -1,0 +1,44 @@
+{
+  "id": "q124",
+  "version": 1,
+  "suite": "agent-analysis",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "What is the efficiency of the attention mechanism — is it the dominant cost or is something else more expensive?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "What is the efficiency of the attention mechanism — is it the dominant cost or is something else more expensive?"
+    }
+  },
+  "raw_answer": "Based on the profile analysis, no kernels related to \"attention\" were found, or their total duration was negligible. Therefore, the attention mechanism is not a dominant cost. The total GPU kernel execution time in this profile is approximately 149.47 seconds, indicating that other operations are significantly more expensive.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "STRINGIDS",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "SELECT SUM(CUPTI_ACTIVITY_KIND_KERNEL.end - CUPTI_ACTIVITY_KIND_KERNEL.start) FROM CUPTI_ACTIVITY_KIND_KERNEL JOIN StringIds ON CUPTI_ACTIVITY_KIND_KERNEL.demangledName = StringIds.id WHERE LOWER(StringIds.value) LIKE '%attention%';",
+        "SELECT SUM(end - start) FROM CUPTI_ACTIVITY_KIND_KERNEL;"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

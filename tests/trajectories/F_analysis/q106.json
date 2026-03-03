@@ -1,0 +1,51 @@
+{
+  "id": "q106",
+  "version": 1,
+  "suite": "agent-analysis",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "How many training iterations are captured in this profile, and what is the average iteration time?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "How many training iterations are captured in this profile, and what is the average iteration time?"
+    }
+  },
+  "raw_answer": "There are 119 training iterations captured in this profile, identified by the `ncclGroupStart` and `ncclGroupEnd` NVTX events.\n\nCalculating the precise average iteration time would require correlating the `start` timestamp of each `ncclGroupStart` event with the `end` timestamp of its corresponding `ncclGroupEnd` event, and then averaging these durations. This type of inter-event correlation and calculation is not directly supported by a single SQL query using the `query_profile_db` tool.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 6,
+      "sql_fragments": [
+        "NVTX_EVENTS",
+        "STRINGIDS",
+        "LIMIT",
+        "WHERE",
+        "ORDER BY"
+      ],
+      "raw_sql_calls": [
+        "SELECT DISTINCT T2.value FROM NVTX_EVENTS AS T1 INNER JOIN StringIds AS T2 ON T1.textId = T2.id WHERE T2.value LIKE '%iteration%' LIMIT 50;",
+        "SELECT DISTINCT text FROM NVTX_EVENTS WHERE text LIKE '%iteration%' LIMIT 50;",
+        "SELECT COUNT(T1.start), AVG(T1.end - T1.start) FROM NVTX_EVENTS AS T1 INNER JOIN StringIds AS T2 ON T1.textId = T2.id WHERE T2.value LIKE '%step%' OR T2.value LIKE '%batch%' OR T2.value LIKE '%epoch%';",
+        "SELECT T2.value AS event_name, COUNT(T1.start) AS event_count, AVG(T1.end - T1.start) AS avg_duration_ns FROM NVTX_EVENTS AS T1 INNER JOIN StringIds AS T2 ON T1.textId = T2.id WHERE T1.end IS NOT NULL GROUP BY T2.value ORDER BY event_count DESC LIMIT 20;"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [
+      "ncclGroupStart",
+      "ncclGroupEnd"
+    ],
+    "must_not_contain": []
+  }
+}

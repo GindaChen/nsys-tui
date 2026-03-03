@@ -1,0 +1,46 @@
+{
+  "id": "q047",
+  "version": 1,
+  "suite": "agent-bottleneck",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Where is the longest GEMM operation?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Where is the longest GEMM operation?"
+    }
+  },
+  "raw_answer": "I couldn't find any GEMM operations in the profile database. It's possible they are named differently or not present in this trace.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 0,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "STRINGIDS",
+        "ORDER BY",
+        "LIMIT",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "SELECT T2.value AS kernel_name, (T1.end - T1.start) AS duration_ns FROM CUPTI_ACTIVITY_KIND_KERNEL AS T1 JOIN StringIds AS T2 ON T1.demangledName = T2.id WHERE T2.value LIKE '%GEMM%' ORDER BY duration_ns DESC LIMIT 1",
+        "SELECT T2.value AS kernel_name, (T1.end - T1.start) AS duration_ns FROM CUPTI_ACTIVITY_KIND_KERNEL AS T1 JOIN StringIds AS T2 ON T1.demangledName = T2.id WHERE T2.value LIKE '%gemm%' ORDER BY duration_ns DESC LIMIT 1"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

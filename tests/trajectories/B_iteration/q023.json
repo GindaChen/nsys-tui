@@ -1,0 +1,29 @@
+{
+  "id": "q023",
+  "version": 1,
+  "suite": "agent-iteration",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Where is the backward pass for the first layer?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Where is the backward pass for the first layer?"
+    }
+  },
+  "raw_answer": "I can help you navigate there if you provide the exact kernel name. What is the name of the backward pass kernel for the first layer?",
+  "raw_actions": [],
+  "expected_tool_calls": [],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

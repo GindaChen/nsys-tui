@@ -1,0 +1,52 @@
+{
+  "id": "q077",
+  "version": 1,
+  "suite": "agent-nccl",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Take me to the first NCCL kernel that uses the LL (Low Latency) protocol.",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Take me to the first NCCL kernel that uses the LL (Low Latency) protocol."
+    }
+  },
+  "raw_answer": "",
+  "raw_actions": [
+    {
+      "type": "navigate_to_kernel",
+      "target_name": "ncclDevKernel_Broadcast_RING_LL(ncclDevKernelArgsStorage<(unsigned long)4096>)",
+      "occurrence_index": 1,
+      "reason": "Navigating to the first NCCL kernel using the LL protocol as requested."
+    }
+  ],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 0,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "STRINGIDS",
+        "ORDER BY",
+        "LIMIT",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "SELECT T1.value FROM CUPTI_ACTIVITY_KIND_KERNEL AS T2 INNER JOIN StringIds AS T1 ON T2.demangledName = T1.id WHERE T1.value LIKE '%nccl%' AND T1.value LIKE '%LL%' ORDER BY T2.start ASC LIMIT 1"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

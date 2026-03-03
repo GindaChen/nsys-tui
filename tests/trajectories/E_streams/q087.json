@@ -1,0 +1,29 @@
+{
+  "id": "q087",
+  "version": 1,
+  "suite": "agent-streams",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Are there any PageFaults or Unified Memory transfers in this profile? If so, what is their total duration and impact on performance?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Are there any PageFaults or Unified Memory transfers in this profile? If so, what is their total duration and impact on performance?"
+    }
+  },
+  "raw_answer": "I'm sorry, I cannot determine if there are PageFaults or Unified Memory transfers in this profile, nor can I calculate their duration or impact. The provided database schema does not include tables with information on these specific types of events.",
+  "raw_actions": [],
+  "expected_tool_calls": [],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

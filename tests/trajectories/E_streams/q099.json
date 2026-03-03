@@ -1,0 +1,48 @@
+{
+  "id": "q099",
+  "version": 1,
+  "suite": "agent-streams",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "What is the longest uninterrupted execution block on Stream 21? Which kernels make it up, and what does it tell us about the training pipeline structure?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "What is the longest uninterrupted execution block on Stream 21? Which kernels make it up, and what does it tell us about the training pipeline structure?"
+    }
+  },
+  "raw_answer": "The longest uninterrupted execution block on Stream 21 runs from approximately 23.1 seconds to 23.38 seconds, with a total duration of about 270.9 milliseconds.\n\nThis block is primarily composed of various instantiations of the `nvshmemi_init_array_kernel`, specifically:\n*   `void nvshmemi_init_array_kernel<long>(T1 *, int, T1)`\n*   `void nvshmemi_init_array_kernel<nvshmemi_team_v2 *>(T1 *, int, T1)`\n\nThis uninterrupted execution block, made up of NVSHMEM initialization kernels, suggests a significant phase of memory allocation, setup, or inter-process/inter-GPU communication initialization within the training pipeline. This indicates that a substantial portion of the work on Stream 21 is dedicated to preparing the environment or data structures for subsequent computational tasks, which is common in distributed deep learning or applications heavily relying on shared memory for performance. It could be an area for performance analysis if this initialization is frequently repeated or can be optimized.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "STRINGIDS",
+        "ORDER BY",
+        "LIMIT",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "\nSELECT\n  T1.start,\n  T1.end,\n  T1.end - T1.start AS duration_ns,\n  T2.value AS kernel_name\nFROM CUPTI_ACTIVITY_KIND_KERNEL AS T1\nJOIN StringIds AS T2\n  ON T1.demangledName = T2.id\nWHERE\n  T1.streamId = 21\nORDER BY\n  T1.start\nLIMIT 50;\n"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [
+      "nvshmemi_init_array_kernel",
+      "void nvshmemi_init_array_kernel<long>(T1 *, int, T1)"
+    ],
+    "must_not_contain": []
+  }
+}

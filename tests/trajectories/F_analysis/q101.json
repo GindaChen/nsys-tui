@@ -1,0 +1,46 @@
+{
+  "id": "q101",
+  "version": 1,
+  "suite": "agent-analysis",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "What are the top 3 performance bottlenecks in this profile? Give a brief explanation for each.",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "What are the top 3 performance bottlenecks in this profile? Give a brief explanation for each."
+    }
+  },
+  "raw_answer": "The top 3 performance bottlenecks in this profile are:\n\n1.  **`void flash::flash_bwd_dq_dk_dv_loop_seqk_parallel_kernel<Flash_bwd_kernel_traits<...>>(flash::Flash_bwd_params)`**: This kernel accounts for approximately 39809.77 ms of GPU execution time across 420 occurrences. Its long total duration suggests it's a significant computational workload.\n2.  **`ncclDevKernel_AllGather_RING_LL(ncclDevKernelArgsStorage<(unsigned long)4096>)`**: This NCCL (NVIDIA Collective Communications Library) kernel consumed about 24494.24 ms over 2940 occurrences. This indicates a substantial amount of time spent in inter-GPU communication for all-gather operations, which could be a communication bottleneck.\n3.  **`ncclDevKernel_ReduceScatter_Sum_bf16_RING_LL(ncclDevKernelArgsStorage<(unsigned long)4096>)`**: Another NCCL kernel, this one took roughly 13998.82 ms across 1890 occurrences. This points to further communication overhead related to reduce-scatter operations with bfloat16 data type, suggesting potential communication and synchronization costs across GPUs.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "STRINGIDS",
+        "ORDER BY",
+        "LIMIT"
+      ],
+      "raw_sql_calls": [
+        "SELECT StringIds.value AS kernel_name, SUM(CUPTI_ACTIVITY_KIND_KERNEL.end - CUPTI_ACTIVITY_KIND_KERNEL.start) / 1e6 AS total_duration_ms, COUNT(*) AS occurrence_count FROM CUPTI_ACTIVITY_KIND_KERNEL JOIN StringIds ON CUPTI_ACTIVITY_KIND_KERNEL.demangledName = StringIds.id GROUP BY kernel_name ORDER BY total_duration_ms DESC LIMIT 3"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [
+      "ncclDevKernel_AllGather_RING_LL"
+    ],
+    "must_not_contain": []
+  }
+}

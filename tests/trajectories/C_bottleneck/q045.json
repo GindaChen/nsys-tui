@@ -1,0 +1,44 @@
+{
+  "id": "q045",
+  "version": 1,
+  "suite": "agent-bottleneck",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Show me the slowest memory copy operation (H2D or D2H).",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Show me the slowest memory copy operation (H2D or D2H)."
+    }
+  },
+  "raw_answer": "I couldn't find any memory copy operations (H2D or D2H) in the profile based on common kernel naming conventions. It's possible they are named differently, or that no such operations occurred in the profiled workload.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 0,
+      "max_calls": 5,
+      "sql_fragments": [
+        "STRINGIDS",
+        "ORDER BY",
+        "LIMIT",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "SELECT T2.value AS kernelName, (T1.end - T1.start) AS duration_ns FROM CUPTI_ACTIVITY_KIND_KERNEL AS T1 JOIN StringIds AS T2 ON T1.demangledName = T2.id WHERE T2.value LIKE '%Memcpy%' OR T2.value LIKE '%memcpy%' ORDER BY duration_ns DESC LIMIT 1"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

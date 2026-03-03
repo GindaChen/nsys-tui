@@ -1,0 +1,44 @@
+{
+  "id": "q116",
+  "version": 1,
+  "suite": "agent-analysis",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "What is the total time spent on Flash Attention (forward + backward) and what percentage of GPU time does it represent?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "What is the total time spent on Flash Attention (forward + backward) and what percentage of GPU time does it represent?"
+    }
+  },
+  "raw_answer": "I could not find any kernels with \"FlashAttention\" in their names. Therefore, the total time spent on Flash Attention (forward + backward) is 0, representing 0% of the total GPU time.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "STRINGIDS",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "\nSELECT\n  SUM(CASE WHEN StringIds.value LIKE '%FlashAttentionFwd%' OR StringIds.value LIKE '%FlashAttentionBwd%' THEN (CUPTI_ACTIVITY_KIND_KERNEL.end - CUPTI_ACTIVITY_KIND_KERNEL.start) ELSE 0 END) AS flash_attention_total_ns,\n  SUM(CUPTI_ACTIVITY_KIND_KERNEL.end - CUPTI_ACTIVITY_KIND_KERNEL.start) AS total_gpu_kernel_time_ns\nFROM CUPTI_ACTIVITY_KIND_KERNEL\nJOIN StringIds ON CUPTI_ACTIVITY_KIND_KERNEL.demangledName = StringIds.id;\n",
+        "SELECT DISTINCT StringIds.value FROM CUPTI_ACTIVITY_KIND_KERNEL JOIN StringIds ON CUPTI_ACTIVITY_KIND_KERNEL.demangledName = StringIds.id WHERE StringIds.value LIKE '%FlashAttention%';"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

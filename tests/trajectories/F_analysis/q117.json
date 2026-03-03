@@ -1,0 +1,42 @@
+{
+  "id": "q117",
+  "version": 1,
+  "suite": "agent-analysis",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Are there any signs of kernel launch overhead bottleneck? How many short kernels (< 10 µs) are there?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Are there any signs of kernel launch overhead bottleneck? How many short kernels (< 10 µs) are there?"
+    }
+  },
+  "raw_answer": "There are 11051 kernels with a duration less than 10 microseconds. A high count of such short kernels can sometimes indicate a kernel launch overhead bottleneck, where the overhead of launching the kernel becomes a significant portion of its total execution time.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "SELECT COUNT(*) FROM CUPTI_ACTIVITY_KIND_KERNEL WHERE (end - start) < 10000;"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

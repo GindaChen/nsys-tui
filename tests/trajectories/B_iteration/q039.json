@@ -1,0 +1,29 @@
+{
+  "id": "q039",
+  "version": 1,
+  "suite": "agent-iteration",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Show me the backward pass of the 4th layer in the 2nd iteration.",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Show me the backward pass of the 4th layer in the 2nd iteration."
+    }
+  },
+  "raw_answer": "I can help with that, but I need a more specific kernel name or time range. Could you please provide more details, such as the exact kernel name or the start and end times you'd like to view?",
+  "raw_actions": [],
+  "expected_tool_calls": [],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

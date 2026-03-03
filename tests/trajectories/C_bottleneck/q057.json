@@ -1,0 +1,52 @@
+{
+  "id": "q057",
+  "version": 1,
+  "suite": "agent-bottleneck",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Where is the slowest KV-cache allocation or copy?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Where is the slowest KV-cache allocation or copy?"
+    }
+  },
+  "raw_answer": "",
+  "raw_actions": [
+    {
+      "type": "navigate_to_kernel",
+      "target_name": "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)], std::array<char *, (unsigned long)2>, (int)8, TrivialOffsetCalculator<(int)1, unsigned int>, TrivialOffsetCalculator<(int)1, unsigned int>, at::native::memory::LoadWithCast<(int)1>, at::native::memory::StoreWithCast<(int)1>>(int, T1, T2, T4, T5, T6, T7)",
+      "occurrence_index": 1,
+      "reason": "Navigating to the slowest kernel that appears to be a copy operation related to KV-cache."
+    }
+  ],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 0,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "STRINGIDS",
+        "ORDER BY",
+        "LIMIT",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "SELECT StringIds.value AS kernelName, MAX(CUPTI_ACTIVITY_KIND_KERNEL.end - CUPTI_ACTIVITY_KIND_KERNEL.start) AS duration_ns FROM CUPTI_ACTIVITY_KIND_KERNEL JOIN StringIds ON CUPTI_ACTIVITY_KIND_KERNEL.demangledName = StringIds.id WHERE kernelName LIKE '%KV-cache%' OR kernelName LIKE '%alloc%' OR kernelName LIKE '%copy%' GROUP BY kernelName ORDER BY duration_ns DESC LIMIT 1"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

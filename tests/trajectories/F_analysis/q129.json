@@ -1,0 +1,48 @@
+{
+  "id": "q129",
+  "version": 1,
+  "suite": "agent-analysis",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "How does the NCCL AllReduce time compare to the compute time in the backward pass?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "How does the NCCL AllReduce time compare to the compute time in the backward pass?"
+    }
+  },
+  "raw_answer": "The total time spent in NCCL AllReduce operations is approximately 2.69 seconds (2688 ms).\n\nThe total GPU compute time across all kernels is approximately 149.47 seconds (149474 ms).\n\nTherefore, the NCCL AllReduce time constitutes a small fraction (around 1.8%) of the total GPU compute time in this profile. Please note that this comparison uses total GPU kernel execution time as a proxy for \"compute time in the backward pass\" since specific markers for the backward pass were not available in the profile data.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 5,
+      "sql_fragments": [
+        "NVTX_EVENTS",
+        "WHERE",
+        "STRINGIDS",
+        "CUPTI_ACTIVITY_KIND_KERNEL"
+      ],
+      "raw_sql_calls": [
+        "SELECT SUM(end - start) FROM NVTX_EVENTS WHERE text LIKE '%AllReduce%';",
+        "SELECT SUM(T1.end - T1.start) FROM NVTX_EVENTS AS T1 INNER JOIN StringIds AS T2 ON T1.textId = T2.id WHERE T2.value LIKE '%AllReduce%';",
+        "SELECT SUM(end - start) FROM CUPTI_ACTIVITY_KIND_KERNEL;"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [
+      "1.8%"
+    ],
+    "must_not_contain": []
+  }
+}

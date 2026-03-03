@@ -1,0 +1,29 @@
+{
+  "id": "q026",
+  "version": 1,
+  "suite": "agent-iteration",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Where is the very first attention operation in the third iteration?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Where is the very first attention operation in the third iteration?"
+    }
+  },
+  "raw_answer": "I can help you navigate to specific kernels, but I need the exact name of the \"attention operation\" kernel. Could you please provide the precise kernel name?",
+  "raw_actions": [],
+  "expected_tool_calls": [],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

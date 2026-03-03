@@ -1,0 +1,47 @@
+{
+  "id": "q130",
+  "version": 1,
+  "suite": "agent-analysis",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Give a one-paragraph executive summary of the GPU performance profile: what is working well and what needs improvement?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Give a one-paragraph executive summary of the GPU performance profile: what is working well and what needs improvement?"
+    }
+  },
+  "raw_answer": "The GPU performance profile indicates that activity is heavily concentrated in a few key kernels, which is beneficial for targeted optimization efforts. The primary areas for improvement revolve around the `flash::flash_bwd_dq_dk_dv_loop_seqk_parallel_kernel` and `ncclDevKernel_AllGather_RING_LL` kernels, which together account for over 64 seconds of GPU execution time across numerous calls. Other significant contributors include `ncclDevKernel_ReduceScatter_Sum_bf16_RING_LL`, `nvjet_tst_128x320_64x3_2x1_v_bz_coopB_NNN`, and `flash::flash_fwd_kernel`. Optimizing these dominant kernels, particularly those related to FlashAttention backward pass and NCCL all-gather operations, would yield the most substantial performance gains. The profile suggests the GPU is actively engaged, successfully executing complex computational and communication patterns, with a clear set of hotspots to address for further performance enhancement.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "STRINGIDS",
+        "ORDER BY",
+        "LIMIT"
+      ],
+      "raw_sql_calls": [
+        "\nSELECT\n  s.value AS kernel_name,\n  SUM(k.end - k.start) AS total_duration_ns,\n  COUNT(*) AS call_count\nFROM CUPTI_ACTIVITY_KIND_KERNEL AS k\nJOIN StringIds AS s\n  ON k.demangledName = s.id\nGROUP BY\n  s.value\nORDER BY\n  total_duration_ns DESC\nLIMIT 5;\n"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [
+      "flash::flash_bwd_dq_dk_dv_loop_seqk_parallel_kernel",
+      "ncclDevKernel_AllGather_RING_LL"
+    ],
+    "must_not_contain": []
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "id": "q123",
+  "version": 1,
+  "suite": "agent-analysis",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Are there any opportunities to increase compute-communication overlap to hide NCCL latency?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Are there any opportunities to increase compute-communication overlap to hide NCCL latency?"
+    }
+  },
+  "raw_answer": "There are significant NCCL operations in your profile, such as `ncclDevKernel_AllGather_RING_LL` and `ncclDevKernel_ReduceScatter_Sum_bf16_RING_LL`, which take hundreds of milliseconds. These present opportunities for compute-communication overlap.\n\nTo investigate, I recommend examining the longest NCCL kernel in your profile: `ncclDevKernel_AllGather_RING_LL(ncclDevKernelArgsStorage<(unsigned long)4096>)`, which runs for approximately 255 milliseconds. Look at the timeline around this kernel to identify if there are any idle periods or compute kernels that could be scheduled to overlap with this communication.",
+  "raw_actions": [
+    {
+      "type": "navigate_to_kernel",
+      "target_name": "ncclDevKernel_AllGather_RING_LL(ncclDevKernelArgsStorage<(unsigned long)4096>)",
+      "occurrence_index": 1,
+      "reason": "This is the longest NCCL kernel, and examining it may reveal opportunities for compute-communication overlap."
+    }
+  ],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 5,
+      "sql_fragments": [
+        "NVTX_EVENTS",
+        "LIMIT",
+        "WHERE",
+        "ORDER BY",
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "STRINGIDS"
+      ],
+      "raw_sql_calls": [
+        "SELECT text, start, end FROM NVTX_EVENTS WHERE text LIKE \"%nccl%\" LIMIT 10",
+        "SELECT text, start, end, (end - start) AS duration FROM NVTX_EVENTS WHERE text LIKE '%nccl%' AND end IS NOT NULL ORDER BY duration DESC LIMIT 10",
+        "SELECT StringIds.value AS kernel_name, CUPTI_ACTIVITY_KIND_KERNEL.start, CUPTI_ACTIVITY_KIND_KERNEL.end, (CUPTI_ACTIVITY_KIND_KERNEL.end - CUPTI_ACTIVITY_KIND_KERNEL.start) AS duration_ns FROM CUPTI_ACTIVITY_KIND_KERNEL JOIN StringIds ON CUPTI_ACTIVITY_KIND_KERNEL.demangledName = StringIds.id WHERE kernel_name LIKE '%nccl%' ORDER BY duration_ns DESC LIMIT 10"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [
+      "ncclDevKernel_AllGather_RING_LL(ncclDevKernelArgsStorage<(un",
+      "ncclDevKernel_AllGather_RING_LL",
+      "ncclDevKernel_ReduceScatter_Sum_bf16_RING_LL"
+    ],
+    "must_not_contain": []
+  }
+}

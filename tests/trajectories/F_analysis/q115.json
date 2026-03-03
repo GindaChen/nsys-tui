@@ -1,0 +1,44 @@
+{
+  "id": "q115",
+  "version": 1,
+  "suite": "agent-analysis",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "How many NCCL streams are active, and is there any imbalance between them?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "How many NCCL streams are active, and is there any imbalance between them?"
+    }
+  },
+  "raw_answer": "There are 3 active NCCL streams.\n\nThere is a significant imbalance between them:\n*   **Stream 56**: 37.9 seconds (4725 kernels)\n*   **Stream 52**: 0.68 seconds (294 kernels)\n*   **Stream 60**: 0.18 seconds (210 kernels)\n\nStream 56 accounts for the vast majority of NCCL kernel execution time.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "STRINGIDS",
+        "ORDER BY",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "\nSELECT\n  k.streamId,\n  COUNT(k.streamId) AS kernel_count,\n  SUM(k.end - k.start) AS total_duration_ns\nFROM CUPTI_ACTIVITY_KIND_KERNEL AS k\nJOIN StringIds AS s\n  ON k.demangledName = s.id\nWHERE\n  s.value LIKE '%nccl%'\nGROUP BY\n  k.streamId\nORDER BY\n  total_duration_ns DESC;\n"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

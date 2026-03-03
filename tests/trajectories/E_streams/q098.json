@@ -1,0 +1,29 @@
+{
+  "id": "q098",
+  "version": 1,
+  "suite": "agent-streams",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Are there significant cross-stream dependency stalls (event record/wait gaps) that force serialization of otherwise parallel work? What is their total cost?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Are there significant cross-stream dependency stalls (event record/wait gaps) that force serialization of otherwise parallel work? What is their total cost?"
+    }
+  },
+  "raw_answer": "I cannot directly identify \"cross-stream dependency stalls (event record/wait gaps)\" or quantify their total cost using the available tools. This kind of analysis typically requires inspecting the timeline for gaps between `cudaEventRecord` and `cudaEventWait` operations and their dependent kernels. Please examine the timeline manually for these patterns.",
+  "raw_actions": [],
+  "expected_tool_calls": [],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

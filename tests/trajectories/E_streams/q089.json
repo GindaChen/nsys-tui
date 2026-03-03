@@ -1,0 +1,43 @@
+{
+  "id": "q089",
+  "version": 1,
+  "suite": "agent-streams",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "How many synchronization barriers (cudaStreamSynchronize / cudaDeviceSynchronize equivalent gaps) occur, and what is their total blocking duration?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "How many synchronization barriers (cudaStreamSynchronize / cudaDeviceSynchronize equivalent gaps) occur, and what is their total blocking duration?"
+    }
+  },
+  "raw_answer": "No synchronization barriers explicitly named \"cudaStreamSynchronize\" or \"cudaDeviceSynchronize\" were found in the profile.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 5,
+      "sql_fragments": [
+        "NVTX_EVENTS",
+        "STRINGIDS",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "SELECT COUNT(*) AS barrier_count, SUM(NVTX_EVENTS.end - NVTX_EVENTS.start) AS total_blocking_duration_ns FROM NVTX_EVENTS LEFT JOIN StringIds ON NVTX_EVENTS.textId = StringIds.id WHERE NVTX_EVENTS.text LIKE '%cudaStreamSynchronize%' OR StringIds.value LIKE '%cudaStreamSynchronize%' OR NVTX_EVENTS.text LIKE '%cudaDeviceSynchronize%' OR StringIds.value LIKE '%cudaDeviceSynchronize%';"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

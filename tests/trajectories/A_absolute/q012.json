@@ -1,0 +1,44 @@
+{
+  "id": "q012",
+  "version": 1,
+  "suite": "agent-absolute",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Where is the first memory copy (Memcpy H2D) operation?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Where is the first memory copy (Memcpy H2D) operation?"
+    }
+  },
+  "raw_answer": "I couldn't find any \"Memcpy H2D\" or \"Memcpy\" NVTX events in the profile database. It's possible that these operations are named differently or not captured as NVTX events in this specific profile.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 0,
+      "max_calls": 5,
+      "sql_fragments": [
+        "ORDER BY",
+        "LIMIT",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "SELECT start, text FROM NVTX_EVENTS WHERE text LIKE '%Memcpy H2D%' ORDER BY start ASC LIMIT 1",
+        "SELECT start, text FROM NVTX_EVENTS WHERE text LIKE '%Memcpy%' ORDER BY start ASC LIMIT 1"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

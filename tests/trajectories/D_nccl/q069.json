@@ -1,0 +1,54 @@
+{
+  "id": "q069",
+  "version": 1,
+  "suite": "agent-nccl",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Find the first NCCL operation that happens concurrently with compute.",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Find the first NCCL operation that happens concurrently with compute."
+    }
+  },
+  "raw_answer": "The first NCCL operation that happens concurrently with a compute kernel is `ncclCommInitRankConfig`, starting at 26.397 seconds and ending at 27.580 seconds. It runs concurrently with the kernel `void at::native::vectorized_elementwise_kernel<(int)4, at::native::AUnaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float>>, std::array<char *, (unsigned long)2>>(int, T2, T3)`.",
+  "raw_actions": [
+    {
+      "type": "zoom_to_time_range",
+      "start_s": 26.397398139,
+      "end_s": 27.580579147
+    }
+  ],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 0,
+      "max_calls": 5,
+      "sql_fragments": [
+        "NVTX_EVENTS",
+        "STRINGIDS",
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "ORDER BY",
+        "LIMIT",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "\nSELECT\n  NE.start,\n  NE.end,\n  COALESCE(NE.text, S_nvtx.value) AS NVTX_Name,\n  S_kernel.value AS Kernel_Name,\n  KK.start AS Kernel_start,\n  KK.end AS Kernel_end\nFROM\n  NVTX_EVENTS AS NE\nLEFT JOIN\n  StringIds AS S_nvtx\nON\n  NE.textId = S_nvtx.id\nJOIN\n  CUPTI_ACTIVITY_KIND_KERNEL AS KK\nON\n  (NE.start < KK.end AND NE.end > KK.start)\nJOIN\n  StringIds AS S_kernel\nON\n  KK.demangledName = S_kernel.id\nWHERE\n  (NE.text LIKE '%nccl%' OR S_nvtx.value LIKE '%nccl%')\nORDER BY\n  NE.start\nLIMIT 1;\n"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [
+      "ncclCommInitRankConfig"
+    ],
+    "must_not_contain": []
+  }
+}

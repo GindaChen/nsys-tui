@@ -1,0 +1,51 @@
+{
+  "id": "q076",
+  "version": 1,
+  "suite": "agent-nccl",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Find the longest sequence of back-to-back NCCL kernels.",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Find the longest sequence of back-to-back NCCL kernels."
+    }
+  },
+  "raw_answer": "I found the longest sequence of back-to-back NCCL kernels. It consists of 14 kernels and spans approximately 19.02 milliseconds, from `55.193864507` seconds to `55.212889286` seconds in the profile.\n\nWould you like me to zoom to this time range in the UI?",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 0,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "STRINGIDS",
+        "NCCL_KERNELS",
+        "SEQUENCES",
+        "SEQUENCE_GROUPS",
+        "ORDER BY",
+        "LIMIT",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "\nWITH NCCL_KERNELS AS (\n    SELECT\n        k.start,\n        k.end,\n        s.value AS kernelName,\n        LAG(k.end, 1, 0) OVER (ORDER BY k.start) AS prev_end\n    FROM\n        CUPTI_ACTIVITY_KIND_KERNEL AS k\n    JOIN\n        StringIds AS s ON k.demangledName = s.id\n    WHERE\n        s.value LIKE '%nccl%'\n),\nSEQUENCES AS (\n    SELECT\n        start,\n        end,\n        kernelName,\n        CASE\n            WHEN prev_end = 0 THEN 1\n            WHEN (start - prev_end) > 100 THEN 1 -- Gap > 100ns (0.1us) indicates a new sequence\n            ELSE 0\n        END AS is_new_sequence_start\n    FROM\n        NCCL_KERNELS\n),\nSEQUENCE_GROUPS AS (\n    SELECT\n        start,\n        end,\n        kernelName,\n        SUM(is_new_sequence_start) OVER (ORDER BY start) AS sequence_id\n    FROM\n        SEQUENCES\n)\nSELECT\n    sequence_id,\n    COUNT(*) AS sequence_length,\n    MIN(start) AS sequence_start,\n    MAX(end) AS sequence_end,\n    (MAX(end) - MIN(start)) AS sequence_duration_ns\nFROM\n    SEQUENCE_GROUPS\nGROUP BY\n    sequence_id\nORDER BY\n    sequence_length DESC\nLIMIT 1;\n"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [
+      "55.193864507",
+      "55.212889286"
+    ],
+    "must_not_contain": []
+  }
+}

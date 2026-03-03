@@ -1,0 +1,43 @@
+{
+  "id": "q081",
+  "version": 1,
+  "suite": "agent-streams",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "How many GPU streams are active in this profile, and what is each stream's primary role (compute, NCCL, memory transfer)?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "How many GPU streams are active in this profile, and what is each stream's primary role (compute, NCCL, memory transfer)?"
+    }
+  },
+  "raw_answer": "This profile has 5 active GPU streams. I cannot determine the primary role of each stream (compute, NCCL, memory transfer) from the available database schema.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL"
+      ],
+      "raw_sql_calls": [
+        "SELECT COUNT(DISTINCT streamId) FROM CUPTI_ACTIVITY_KIND_KERNEL;"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [
+      "5 active GPU streams"
+    ],
+    "must_not_contain": []
+  }
+}

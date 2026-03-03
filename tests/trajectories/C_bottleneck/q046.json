@@ -1,0 +1,45 @@
+{
+  "id": "q046",
+  "version": 1,
+  "suite": "agent-bottleneck",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Go to the shortest Flash Attention kernel.",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Go to the shortest Flash Attention kernel."
+    }
+  },
+  "raw_answer": "I could not find any kernels containing \"Flash Attention\" in their name. Please make sure the name is spelled correctly or try a different kernel.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 0,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "STRINGIDS",
+        "ORDER BY",
+        "LIMIT",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "SELECT T2.value AS kernelName, (T1.end - T1.start) AS duration_ns FROM CUPTI_ACTIVITY_KIND_KERNEL AS T1 INNER JOIN StringIds AS T2 ON T1.demangledName = T2.id WHERE T2.value LIKE '%Flash Attention%' ORDER BY duration_ns ASC LIMIT 1"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

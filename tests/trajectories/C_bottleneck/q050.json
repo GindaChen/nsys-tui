@@ -1,0 +1,47 @@
+{
+  "id": "q050",
+  "version": 1,
+  "suite": "agent-bottleneck",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Show me the most time-consuming kernel on Stream 21.",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Show me the most time-consuming kernel on Stream 21."
+    }
+  },
+  "raw_answer": "The most time-consuming kernel on Stream 21 is `nvshmemi_init_array_kernel` with a duration of 155,640,387 ns (approximately 155.64 ms).",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 0,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "STRINGIDS",
+        "ORDER BY",
+        "LIMIT",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "SELECT T2.value AS kernel_name, (T1.end - T1.start) AS duration_ns FROM CUPTI_ACTIVITY_KIND_KERNEL AS T1 INNER JOIN StringIds AS T2 ON T1.shortName = T2.id WHERE T1.streamId = 21 ORDER BY duration_ns DESC LIMIT 1"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [
+      "nvshmemi_init_array_kernel"
+    ],
+    "must_not_contain": []
+  }
+}

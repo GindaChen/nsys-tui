@@ -1,0 +1,52 @@
+{
+  "id": "q075",
+  "version": 1,
+  "suite": "agent-nccl",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Show me the first NCCL operation on Stream 60.",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Show me the first NCCL operation on Stream 60."
+    }
+  },
+  "raw_answer": "",
+  "raw_actions": [
+    {
+      "type": "navigate_to_kernel",
+      "target_name": "ncclDevKernel_AllReduce_Sum_f32_TREE_LL(ncclDevKernelArgsStorage<(unsigned long)4096>)",
+      "occurrence_index": 1,
+      "reason": "This is the first NCCL kernel found on Stream 60."
+    }
+  ],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 0,
+      "max_calls": 5,
+      "sql_fragments": [
+        "STRINGIDS",
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "ORDER BY",
+        "LIMIT",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "SELECT T1.value AS kernelName, T2.start FROM StringIds AS T1 INNER JOIN CUPTI_ACTIVITY_KIND_KERNEL AS T2 ON T1.id = T2.demangledName WHERE T2.streamId = 60 AND (T1.value LIKE '%nccl%' OR T1.value LIKE '%Nccl%') ORDER BY T2.start LIMIT 1"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

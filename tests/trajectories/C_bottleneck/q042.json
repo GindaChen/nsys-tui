@@ -1,0 +1,52 @@
+{
+  "id": "q042",
+  "version": 1,
+  "suite": "agent-bottleneck",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Where is the longest flash_fwd_kernel?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Where is the longest flash_fwd_kernel?"
+    }
+  },
+  "raw_answer": "",
+  "raw_actions": [
+    {
+      "type": "navigate_to_kernel",
+      "target_name": "void flash::flash_fwd_kernel<Flash_fwd_kernel_traits<(int)128, (int)128, (int)64, (int)4, (bool)0, (bool)0, cutlass::bfloat16_t, Flash_kernel_traits<(int)128, (int)128, (int)64, (int)4, cutlass::bfloat16_t>>, (bool)0, (bool)1, (bool)0, (bool)0, (bool)0, (bool)1, (bool)0, (bool)0>(flash::Flash_fwd_params)",
+      "occurrence_index": 1,
+      "reason": "Navigating to the longest 'flash_fwd_kernel' found in the profile."
+    }
+  ],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 0,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "STRINGIDS",
+        "ORDER BY",
+        "LIMIT",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "\nSELECT\n  T2.value,\n  (T1.end - T1.start) AS duration_ns\nFROM\n  CUPTI_ACTIVITY_KIND_KERNEL AS T1\nINNER JOIN\n  StringIds AS T2\nON\n  T1.demangledName = T2.id\nWHERE\n  T2.value LIKE '%flash_fwd_kernel%'\nORDER BY\n  duration_ns DESC\nLIMIT 1;\n"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

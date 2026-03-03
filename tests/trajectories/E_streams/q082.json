@@ -1,0 +1,42 @@
+{
+  "id": "q082",
+  "version": 1,
+  "suite": "agent-streams",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "What is the total active time vs idle time for Stream 21? What fraction of time is it actually executing kernels?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "What is the total active time vs idle time for Stream 21? What fraction of time is it actually executing kernels?"
+    }
+  },
+  "raw_answer": "For Stream 21:\n\n*   **Total active time (cumulative kernel execution time):** Approximately 110.70 seconds. This is the sum of the durations of all kernels associated with Stream 21.\n*   **Overall wall-clock span:** Approximately 32.15 seconds. This is the duration from the start of the first kernel to the end of the last kernel associated with Stream 21.\n\nThe total active time (110.70s) being significantly greater than the overall wall-clock span (32.15s) indicates that there is substantial concurrency of kernels within what is identified as \"Stream 21\".\n\nGiven this concurrency:\n*   **Idle time:** A direct calculation of \"idle time\" (overall span - active time) would result in a negative value, which is not a meaningful representation in this highly concurrent scenario. The data suggests that Stream 21 is highly utilized, with overlapping kernel executions.\n*   **Fraction of time executing kernels:** Due to concurrency, the \"fraction\" can be expressed as an average concurrency level. On average, approximately 3.44 kernels from Stream 21 are executing concurrently during its observed wall-clock span (110.70s / 32.15s ≈ 3.44).",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "\nSELECT\n  SUM(k.end - k.start) AS total_active_time_ns,\n  MAX(k.end) - MIN(k.start) AS overall_span_ns\nFROM CUPTI_ACTIVITY_KIND_KERNEL AS k\nWHERE k.streamId = 21;\n"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

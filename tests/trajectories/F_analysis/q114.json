@@ -1,0 +1,48 @@
+{
+  "id": "q114",
+  "version": 1,
+  "suite": "agent-analysis",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "What is the average latency of AllReduce operations? Are there any unusually slow AllReduce calls?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "What is the average latency of AllReduce operations? Are there any unusually slow AllReduce calls?"
+    }
+  },
+  "raw_answer": "The average latency of AllReduce operations is **11.29 ms**.\n\nThere are indeed unusually slow AllReduce calls, with the slowest recorded at **338.48 ms**, which is significantly higher than the average.\n\nHere are the top 5 slowest AllReduce calls:\n*   **ncclAllReduce**: Duration: 338.48 ms (Start: 33.68 s, End: 34.02 s)\n*   **ncclAllReduce**: Duration: 337.72 ms (Start: 33.69 s, End: 34.02 s)\n*   **ncclAllReduce**: Duration: 336.59 ms (Start: 33.69 s, End: 34.02 s)\n*   **ncclAllReduce**: Duration: 335.23 ms (Start: 33.68 s, End: 34.02 s)\n*   **ncclAllReduce**: Duration: 333.09 ms (Start: 33.69 s, End: 34.02 s)",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 6,
+      "sql_fragments": [
+        "NVTX_EVENTS",
+        "WHERE",
+        "STRINGIDS",
+        "ORDER BY",
+        "LIMIT"
+      ],
+      "raw_sql_calls": [
+        "SELECT start, end, text FROM NVTX_EVENTS WHERE text LIKE '%AllReduce%'",
+        "SELECT NVTX_EVENTS.start, NVTX_EVENTS.end, StringIds.value FROM NVTX_EVENTS JOIN StringIds ON NVTX_EVENTS.textId = StringIds.id WHERE StringIds.value LIKE '%AllReduce%'",
+        "SELECT AVG(NVTX_EVENTS.end - NVTX_EVENTS.start) AS average_latency_ns, MAX(NVTX_EVENTS.end - NVTX_EVENTS.start) AS max_latency_ns FROM NVTX_EVENTS JOIN StringIds ON NVTX_EVENTS.textId = StringIds.id WHERE StringIds.value LIKE '%AllReduce%'",
+        "SELECT StringIds.value AS event_name, (NVTX_EVENTS.end - NVTX_EVENTS.start) AS duration_ns, NVTX_EVENTS.start, NVTX_EVENTS.end FROM NVTX_EVENTS JOIN StringIds ON NVTX_EVENTS.textId = StringIds.id WHERE StringIds.value LIKE '%AllReduce%' ORDER BY duration_ns DESC LIMIT 5"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

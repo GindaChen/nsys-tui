@@ -1,0 +1,48 @@
+{
+  "id": "q094",
+  "version": 1,
+  "suite": "agent-streams",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "What is the utilization profile of Stream 56 — what is its total active time, busiest kernel type, and any notable idle gaps?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "What is the utilization profile of Stream 56 — what is its total active time, busiest kernel type, and any notable idle gaps?"
+    }
+  },
+  "raw_answer": "The utilization profile of Stream 56 is as follows:\n\n*   **Total Active Time**: The kernels within Stream 56 collectively ran for approximately 37.91 seconds.\n*   **Busiest Kernel Type**: The kernel type with the highest cumulative duration is `ncclDevKernel_AllGather_RING_LL(ncclDevKernelArgsStorage<(unsigned long)4096>)`, accounting for approximately 23.91 seconds of the total active time.\n*   **Notable Idle Gaps**: The total duration from the start of the first kernel to the end of the last kernel in Stream 56 is approximately 26.38 seconds. Since the total active time of all kernels (37.91 seconds) is greater than this overall span, it indicates a high degree of concurrent kernel execution for activities tagged with `streamId = 56`. This suggests that there are no significant idle gaps within the stream's operational window; rather, multiple kernels associated with this stream ID are running in parallel, likely across different devices or contexts.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "WHERE",
+        "STRINGIDS",
+        "ORDER BY",
+        "LIMIT"
+      ],
+      "raw_sql_calls": [
+        "\nSELECT\n    SUM(end - start) AS total_kernel_duration_ns,\n    MIN(start) AS first_kernel_start_ns,\n    MAX(end) AS last_kernel_end_ns\nFROM\n    CUPTI_ACTIVITY_KIND_KERNEL\nWHERE\n    streamId = 56;\n",
+        "\nSELECT\n    T2.value AS kernel_name,\n    SUM(T1.end - T1.start) AS total_duration_ns\nFROM\n    CUPTI_ACTIVITY_KIND_KERNEL AS T1\nINNER JOIN\n    StringIds AS T2\nON\n    T1.demangledName = T2.id\nWHERE\n    T1.streamId = 56\nGROUP BY\n    T2.value\nORDER BY\n    total_duration_ns DESC\nLIMIT 1;\n"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [
+      "ncclDevKernel_AllGather_RING_LL(ncclDevKernelArgsStorage<(unsigned long)4096>)"
+    ],
+    "must_not_contain": []
+  }
+}

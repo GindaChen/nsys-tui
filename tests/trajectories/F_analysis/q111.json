@@ -1,0 +1,52 @@
+{
+  "id": "q111",
+  "version": 1,
+  "suite": "agent-analysis",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "How much total time is spent on NCCL operations, and what is the breakdown by collective type (AllReduce, AllGather, ReduceScatter)?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "How much total time is spent on NCCL operations, and what is the breakdown by collective type (AllReduce, AllGather, ReduceScatter)?"
+    }
+  },
+  "raw_answer": "The total time spent on NCCL operations is approximately **30.999 seconds** (30999.45 ms).\n\nHere is the breakdown by collective type:\n\n*   **Other NCCL**: 23752.35 ms (76.62%)\n*   **AllReduce**: 2688.04 ms (8.67%)\n*   **ReduceScatter**: 2361.68 ms (7.62%)\n*   **Broadcast**: 1967.71 ms (6.35%)\n*   **AllGather**: 129.67 ms (0.42%)",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 7,
+      "sql_fragments": [
+        "NVTX_EVENTS",
+        "ORDER BY",
+        "WHERE",
+        "STRINGIDS",
+        "LIMIT",
+        "NVTX_EVENT_NAMES"
+      ],
+      "raw_sql_calls": [
+        "\nSELECT\n    CASE\n        WHEN NVTX_EVENTS.text LIKE 'NCCL/AllReduce%' THEN 'AllReduce'\n        WHEN NVTX_EVENTS.text LIKE 'NCCL/AllGather%' THEN 'AllGather'\n        WHEN NVTX_EVENTS.text LIKE 'NCCL/ReduceScatter%' THEN 'ReduceScatter'\n        ELSE 'Other NCCL'\n    END AS collective_type,\n    SUM(NVTX_EVENTS.end - NVTX_EVENTS.start) AS total_time_ns\nFROM\n    NVTX_EVENTS\nWHERE\n    NVTX_EVENTS.text LIKE 'NCCL/%'\nGROUP BY\n    collective_type\nORDER BY\n    total_time_ns DESC;\n",
+        "\nSELECT\n    CASE\n        WHEN NVTX_EVENTS.text IS NOT NULL THEN NVTX_EVENTS.text\n        ELSE StringIds.value\n    END AS event_name,\n    NVTX_EVENTS.start,\n    NVTX_EVENTS.end\nFROM\n    NVTX_EVENTS\nLEFT JOIN\n    StringIds ON NVTX_EVENTS.textId = StringIds.id\nWHERE\n    event_name LIKE 'NCCL/%'\nLIMIT 10;\n",
+        "\nSELECT DISTINCT\n    CASE\n        WHEN NVTX_EVENTS.text IS NOT NULL THEN NVTX_EVENTS.text\n        ELSE StringIds.value\n    END AS event_name\nFROM\n    NVTX_EVENTS\nLEFT JOIN\n    StringIds ON NVTX_EVENTS.textId = StringIds.id\nLIMIT 50;\n",
+        "\nSELECT\n    CASE\n        WHEN event_name LIKE 'ncclAllReduce%' THEN 'AllReduce'\n        WHEN event_name LIKE 'ncclAllGather%' THEN 'AllGather'\n        WHEN event_name LIKE 'ncclReduceScatter%' THEN 'ReduceScatter'\n        WHEN event_name LIKE 'ncclBroadcast%' THEN 'Broadcast'\n        WHEN event_name LIKE 'NCCL Progress%' THEN 'NCCL Progress'\n        WHEN event_name = 'NCCL' THEN 'General NCCL'\n        ELSE 'Other NCCL'\n    END AS collective_type,\n    SUM(NVTX_EVENTS.end - NVTX_EVENTS.start) AS total_time_ns\nFROM\n    NVTX_EVENTS\nLEFT JOIN\n    StringIds ON NVTX_EVENTS.textId = StringIds.id\nWHERE\n    event_name LIKE 'nccl%' OR event_name LIKE 'NCCL%'\nGROUP BY\n    collective_type\nORDER BY\n    total_time_ns DESC;\n",
+        "\nWITH NVTX_Event_Names AS (\n    SELECT\n        NVTX_EVENTS.start,\n        NVTX_EVENTS.end,\n        CASE\n            WHEN NVTX_EVENTS.text IS NOT NULL THEN NVTX_EVENTS.text\n            ELSE StringIds.value\n        END AS event_name\n    FROM\n        NVTX_EVENTS\n    LEFT JOIN\n        StringIds ON NVTX_EVENTS.textId = StringIds.id\n)\nSELECT\n    CASE\n        WHEN event_name LIKE 'ncclAllReduce%' THEN 'AllReduce'\n        WHEN event_name LIKE 'ncclAllGather%' THEN 'AllGather'\n        WHEN event_name LIKE 'ncclReduceScatter%' THEN 'ReduceScatter'\n        WHEN event_name LIKE 'ncclBroadcast%' THEN 'Broadcast'\n        WHEN event_name LIKE 'NCCL Progress%' THEN 'NCCL Progress'\n        WHEN event_name = 'NCCL' THEN 'General NCCL'\n        ELSE 'Other NCCL'\n    END AS collective_type,\n    SUM(NVTX_Event_Names.end - NVTX_Event_Names.start) / 1e6 AS total_time_ms\nFROM\n    NVTX_Event_Names\nWHERE\n    event_name LIKE 'nccl%' OR event_name LIKE 'NCCL%'\nGROUP BY\n    collective_type\nORDER BY\n    total_time_ms DESC;\n"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [
+      "76.62%"
+    ],
+    "must_not_contain": []
+  }
+}

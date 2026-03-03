@@ -1,0 +1,45 @@
+{
+  "id": "q113",
+  "version": 1,
+  "suite": "agent-analysis",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Which NCCL collective operation takes the most total time — AllReduce, AllGather, or ReduceScatter?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Which NCCL collective operation takes the most total time — AllReduce, AllGather, or ReduceScatter?"
+    }
+  },
+  "raw_answer": "The NCCL AllReduce collective operation takes the most total time in this profile, with a total duration of approximately 2.69 seconds.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 5,
+      "sql_fragments": [
+        "NVTX_EVENTS",
+        "ORDER BY",
+        "WHERE",
+        "STRINGIDS"
+      ],
+      "raw_sql_calls": [
+        "\nSELECT\n  CASE\n    WHEN text LIKE '%AllReduce%' THEN 'AllReduce'\n    WHEN text LIKE '%AllGather%' THEN 'AllGather'\n    WHEN text LIKE '%ReduceScatter%' THEN 'ReduceScatter'\n    ELSE 'Other'\n  END AS collective_type,\n  SUM(end - start) AS total_duration_ns\nFROM NVTX_EVENTS\nWHERE\n  text LIKE '%AllReduce%' OR\n  text LIKE '%AllGather%' OR\n  text LIKE '%ReduceScatter%'\nGROUP BY\n  collective_type\nORDER BY\n  total_duration_ns DESC;\n",
+        "\nSELECT\n  CASE\n    WHEN T2.value LIKE '%AllReduce%' THEN 'AllReduce'\n    WHEN T2.value LIKE '%AllGather%' THEN 'AllGather'\n    WHEN T2.value LIKE '%ReduceScatter%' THEN 'ReduceScatter'\n    ELSE 'Other'\n  END AS collective_type,\n  SUM(T1.end - T1.start) AS total_duration_ns\nFROM NVTX_EVENTS AS T1\nINNER JOIN StringIds AS T2\n  ON T1.textId = T2.id\nWHERE\n  T2.value LIKE '%AllReduce%' OR\n  T2.value LIKE '%AllGather%' OR\n  T2.value LIKE '%ReduceScatter%'\nGROUP BY\n  collective_type\nORDER BY\n  total_duration_ns DESC;\n"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

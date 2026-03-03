@@ -1,0 +1,45 @@
+{
+  "id": "q043",
+  "version": 1,
+  "suite": "agent-bottleneck",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Navigate to the longest ncclDevKernel_AllReduce.",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Navigate to the longest ncclDevKernel_AllReduce."
+    }
+  },
+  "raw_answer": "I couldn't find any kernel named `ncclDevKernel_AllReduce` in the profile. Please check the spelling or provide an alternative kernel name.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 0,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "STRINGIDS",
+        "ORDER BY",
+        "LIMIT",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "SELECT S.value AS kernel_name, K.start, K.end, (K.end - K.start) AS duration_ns FROM CUPTI_ACTIVITY_KIND_KERNEL AS K JOIN StringIds AS S ON K.demangledName = S.id WHERE S.value = 'ncclDevKernel_AllReduce' ORDER BY duration_ns DESC LIMIT 1;"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

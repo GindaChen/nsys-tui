@@ -1,0 +1,44 @@
+{
+  "id": "q016",
+  "version": 1,
+  "suite": "agent-absolute",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Find the 100th kernel in the entire profile.",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Find the 100th kernel in the entire profile."
+    }
+  },
+  "raw_answer": "The 100th kernel in the profile is `void at::native::vectorized_elementwise_kernel<(int)2, at::native::FillFunctor<double>, std::array<char *, (unsigned long)1>>(int, T2, T3)`.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 0,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "STRINGIDS",
+        "ORDER BY",
+        "LIMIT"
+      ],
+      "raw_sql_calls": [
+        "SELECT T2.value AS demangledName FROM CUPTI_ACTIVITY_KIND_KERNEL AS T1 INNER JOIN StringIds AS T2 ON T1.demangledName = T2.id ORDER BY T1.start LIMIT 1 OFFSET 99"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

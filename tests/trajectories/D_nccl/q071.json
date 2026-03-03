@@ -1,0 +1,51 @@
+{
+  "id": "q071",
+  "version": 1,
+  "suite": "agent-nccl",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Take me to the last NCCL operation in the first iteration.",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Take me to the last NCCL operation in the first iteration."
+    }
+  },
+  "raw_answer": "",
+  "raw_actions": [
+    {
+      "type": "zoom_to_time_range",
+      "start_s": 26.58349891,
+      "end_s": 27.868319737
+    }
+  ],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 0,
+      "max_calls": 5,
+      "sql_fragments": [
+        "NVTX_EVENTS",
+        "STRINGIDS",
+        "ORDER BY",
+        "LIMIT",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "\nSELECT\n  T1.start,\n  T1.end\nFROM\n  NVTX_EVENTS AS T1\nLEFT JOIN\n  StringIds AS T2\nON\n  T1.textId = T2.id\nWHERE\n  (T1.text LIKE '%NCCL%' OR T2.value LIKE '%NCCL%')\nORDER BY\n  T1.start ASC\nLIMIT 10;\n"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

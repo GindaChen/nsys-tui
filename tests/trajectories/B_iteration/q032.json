@@ -1,0 +1,36 @@
+{
+  "id": "q032",
+  "version": 1,
+  "suite": "agent-iteration",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Where is the embedding lookup for the third iteration?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Where is the embedding lookup for the third iteration?"
+    }
+  },
+  "raw_answer": "",
+  "raw_actions": [
+    {
+      "type": "navigate_to_kernel",
+      "target_name": "embedding_lookup",
+      "occurrence_index": 3,
+      "reason": "Navigating to the third occurrence of the embedding lookup kernel as requested."
+    }
+  ],
+  "expected_tool_calls": [],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

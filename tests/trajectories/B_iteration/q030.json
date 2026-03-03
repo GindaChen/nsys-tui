@@ -1,0 +1,44 @@
+{
+  "id": "q030",
+  "version": 1,
+  "suite": "agent-iteration",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Where does the second iteration actually begin?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Where does the second iteration actually begin?"
+    }
+  },
+  "raw_answer": "The second kernel starts at 23.105 seconds. This is the earliest point I can identify that might be considered the beginning of a second iteration, assuming iterations are delineated by kernel launches.\n\nWould you like to zoom to this time?",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 0,
+      "max_calls": 5,
+      "sql_fragments": [
+        "NVTX_EVENTS",
+        "ORDER BY",
+        "LIMIT"
+      ],
+      "raw_sql_calls": [
+        "SELECT NVTX_EVENTS.start, NVTX_EVENTS.text, StringIds.value FROM NVTX_EVENTS LEFT JOIN StringIds ON NVTX_EVENTS.textId = StringIds.id WHERE NVTX_EVENTS.text LIKE '%iteration%' OR StringIds.value LIKE '%iteration%' ORDER BY NVTX_EVENTS.start ASC LIMIT 2",
+        "SELECT start FROM CUPTI_ACTIVITY_KIND_KERNEL ORDER BY start ASC LIMIT 2"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

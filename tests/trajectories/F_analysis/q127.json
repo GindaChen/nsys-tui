@@ -1,0 +1,42 @@
+{
+  "id": "q127",
+  "version": 1,
+  "suite": "agent-analysis",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "How does the time distribution across GPU streams compare? Is any stream a clear bottleneck?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "How does the time distribution across GPU streams compare? Is any stream a clear bottleneck?"
+    }
+  },
+  "raw_answer": "Here's the GPU time distribution across streams:\n\n*   **Stream 21**: 110702.80 ms\n*   **Stream 56**: 37905.90 ms\n*   **Stream 52**: 679.42 ms\n*   **Stream 60**: 177.21 ms\n*   **Stream 35**: 8.67 ms\n\nStream 21 is a clear bottleneck, accounting for the vast majority of GPU execution time. Stream 56 also has a significant amount of GPU activity, while the other streams have minimal impact.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "ORDER BY"
+      ],
+      "raw_sql_calls": [
+        "SELECT streamId, SUM(end - start) / 1000000.0 AS total_gpu_time_ms FROM CUPTI_ACTIVITY_KIND_KERNEL GROUP BY streamId ORDER BY total_gpu_time_ms DESC;"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

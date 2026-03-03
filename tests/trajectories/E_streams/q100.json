@@ -1,0 +1,44 @@
+{
+  "id": "q100",
+  "version": 1,
+  "suite": "agent-streams",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Overall, how efficient is the multi-stream scheduling in this profile? Are there concrete opportunities to improve parallelism across streams?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Overall, how efficient is the multi-stream scheduling in this profile? Are there concrete opportunities to improve parallelism across streams?"
+    }
+  },
+  "raw_answer": "The profile shows several active streams across multiple devices, with `streamId` 21 being the dominant one across all devices (e.g., Device 7, stream 21: 5700 kernels, ~15.9 seconds total duration). `streamId` 56 is the next most active, followed by `streamId` 52 and `streamId` 60, all showing consistent activity across devices.\n\nThe consistent kernel counts and total durations for `streamId` 21 across different devices (e.g., Device 7, 2, 4, 1, 3, 5, 6 all have 5700 kernels and similar total durations for `streamId` 21) suggest a balanced distribution of this primary workload across the devices.\n\nTo identify concrete opportunities for improving parallelism *across streams on a single device*, you would need to examine the timeline for a specific device to see if these streams (`21`, `56`, `52`, `60`) are executing concurrently or if there are serialization bottlenecks where one stream is idle while another is active. If streams are not overlapping as much as they could, then there would be opportunities to improve multi-stream scheduling.\n\nFor further analysis, I recommend zooming in on the timeline for a single device and observing the execution patterns of `streamId` 21 and `streamId` 56 to check for concurrent execution or idle periods that could be filled.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "ORDER BY"
+      ],
+      "raw_sql_calls": [
+        "SELECT deviceId, streamId, COUNT(*) AS kernel_count, SUM(end - start) AS total_duration_ns FROM CUPTI_ACTIVITY_KIND_KERNEL GROUP BY deviceId, streamId ORDER BY total_duration_ns DESC"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [
+      "56 is the next most active, followed by"
+    ],
+    "must_not_contain": []
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "id": "q102",
+  "version": 1,
+  "suite": "agent-analysis",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "How is the overall GPU utilization in this profile? Is it good or poor, and why?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "How is the overall GPU utilization in this profile? Is it good or poor, and why?"
+    }
+  },
+  "raw_answer": "The overall GPU utilization in this profile appears to be very good. The total sum of all kernel execution durations is approximately 149.47 seconds, while the total wall-clock duration of the profile (from the start of the first kernel to the end of the last kernel) is about 36.12 seconds.\n\nThis means that, on average, the GPU was executing kernels for roughly 413% of the wall-clock time. This high percentage indicates significant parallelism, with many kernels executing concurrently across the GPU's streaming multiprocessors, leading to high effective utilization of the GPU's compute resources.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL"
+      ],
+      "raw_sql_calls": [
+        "SELECT SUM(end - start) AS total_kernel_duration_ns, MIN(start) AS profile_start_ns, MAX(end) AS profile_end_ns FROM CUPTI_ACTIVITY_KIND_KERNEL"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

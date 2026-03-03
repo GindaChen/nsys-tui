@@ -1,0 +1,44 @@
+{
+  "id": "q096",
+  "version": 1,
+  "suite": "agent-streams",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "How well is Flash Attention overlapped with NCCL operations? Quantify the overlap and assess whether the pipeline is efficient.",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "How well is Flash Attention overlapped with NCCL operations? Quantify the overlap and assess whether the pipeline is efficient."
+    }
+  },
+  "raw_answer": "I was unable to find any kernels containing \"flash_attn\" in their names within this profile, so I cannot quantify the overlap with NCCL operations.\n\nHowever, I found the following NCCL kernels and their total durations:\n\n*   `ncclDevKernel_AllGather_RING_LL`: 24.49 seconds\n*   `ncclDevKernel_ReduceScatter_Sum_bf16_RING_LL`: 14.00 seconds\n*   `ncclDevKernel_AllReduce_Sum_f32_TREE_LL`: 0.18 seconds\n*   `ncclDevKernel_Broadcast_RING_LL`: 0.09 seconds\n\nTo assess pipeline efficiency and the overlap between different operations, a more detailed analysis of the timeline is typically required, often involving identifying specific phases of execution and looking at concurrent kernel launches. If you can provide more specific kernel names for Flash Attention or a particular time range, I might be able to assist further.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 1,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "STRINGIDS",
+        "ORDER BY",
+        "WHERE"
+      ],
+      "raw_sql_calls": [
+        "\nSELECT\n  StringIds.value AS kernel_name,\n  SUM(CUPTI_ACTIVITY_KIND_KERNEL.end - CUPTI_ACTIVITY_KIND_KERNEL.start) AS total_duration_ns\nFROM CUPTI_ACTIVITY_KIND_KERNEL\nJOIN StringIds ON CUPTI_ACTIVITY_KIND_KERNEL.demangledName = StringIds.id\nWHERE StringIds.value LIKE '%flash_attn%' OR StringIds.value LIKE '%nccl%'\nGROUP BY kernel_name\nORDER BY total_duration_ns DESC;\n"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

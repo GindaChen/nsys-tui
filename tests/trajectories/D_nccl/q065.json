@@ -1,0 +1,48 @@
+{
+  "id": "q065",
+  "version": 1,
+  "suite": "agent-nccl",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Show me the first NCCL Send/Recv operation (P2P).",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Show me the first NCCL Send/Recv operation (P2P)."
+    }
+  },
+  "raw_answer": "I couldn't find any NVTX events or kernels explicitly named \"Send\" or \"Recv\" in this profile. It's possible these operations are named differently, or are not captured with these specific labels.",
+  "raw_actions": [],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 0,
+      "max_calls": 5,
+      "sql_fragments": [
+        "NVTX_EVENTS",
+        "ORDER BY",
+        "LIMIT",
+        "WHERE",
+        "STRINGIDS",
+        "CUPTI_ACTIVITY_KIND_KERNEL"
+      ],
+      "raw_sql_calls": [
+        "\nSELECT\n  start,\n  end,\n  text\nFROM NVTX_EVENTS\nWHERE text LIKE '%Send%' OR text LIKE '%Recv%'\nORDER BY start ASC\nLIMIT 1;\n",
+        "\nSELECT\n  NE.start,\n  NE.end,\n  COALESCE(NE.text, SI.value) AS event_name\nFROM NVTX_EVENTS AS NE\nLEFT JOIN StringIds AS SI\n  ON NE.textId = SI.id\nWHERE\n  COALESCE(NE.text, SI.value) LIKE '%Send%' OR COALESCE(NE.text, SI.value) LIKE '%Recv%'\nORDER BY\n  NE.start ASC\nLIMIT 1;\n",
+        "\nSELECT\n  CAKK.start,\n  CAKK.end,\n  SI.value AS kernel_name\nFROM CUPTI_ACTIVITY_KIND_KERNEL AS CAKK\nJOIN StringIds AS SI\n  ON CAKK.demangledName = SI.id\nWHERE\n  SI.value LIKE '%Send%' OR SI.value LIKE '%Recv%'\nORDER BY\n  CAKK.start ASC\nLIMIT 1;\n"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

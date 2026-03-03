@@ -1,0 +1,29 @@
+{
+  "id": "q122",
+  "version": 1,
+  "suite": "agent-analysis",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Is this workload compute-bound or memory-bandwidth-bound? What evidence supports your conclusion?",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Is this workload compute-bound or memory-bandwidth-bound? What evidence supports your conclusion?"
+    }
+  },
+  "raw_answer": "I cannot definitively determine if this workload is compute-bound or memory-bandwidth-bound from the information available in the provided profile database schema. To make such a determination, I would typically need access to performance counters like SM occupancy, memory throughput, or warp stall reasons, which are not present in the `StringIds`, `NVTX_EVENTS`, or `CUPTI_ACTIVITY_KIND_KERNEL` tables.",
+  "raw_actions": [],
+  "expected_tool_calls": [],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}

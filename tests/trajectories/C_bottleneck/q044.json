@@ -1,0 +1,52 @@
+{
+  "id": "q044",
+  "version": 1,
+  "suite": "agent-bottleneck",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Find the kernel that took the maximum time in the current view.",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Find the kernel that took the maximum time in the current view."
+    }
+  },
+  "raw_answer": "The kernel `ncclDevKernel_AllGather_RING_LL(ncclDevKernelArgsStorage<(unsigned long)4096>)` had the maximum duration of 255.17 ms.",
+  "raw_actions": [
+    {
+      "type": "navigate_to_kernel",
+      "target_name": "ncclDevKernel_AllGather_RING_LL(ncclDevKernelArgsStorage<(unsigned long)4096>)",
+      "occurrence_index": 1,
+      "reason": "This kernel had the maximum duration in the current view."
+    }
+  ],
+  "expected_tool_calls": [
+    {
+      "name": "query_profile_db",
+      "min_calls": 0,
+      "max_calls": 5,
+      "sql_fragments": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "STRINGIDS"
+      ],
+      "raw_sql_calls": [
+        "SELECT s.value AS kernel_name, MAX(k.end - k.start) AS duration_ns FROM CUPTI_ACTIVITY_KIND_KERNEL AS k JOIN StringIds AS s ON k.demangledName = s.id"
+      ]
+    }
+  ],
+  "expected_response": {
+    "must_contain": [
+      "ncclDevKernel_AllGather_RING_LL(ncclDevKernelArgsStorage<(un",
+      "ncclDevKernel_AllGather_RING_LL(ncclDevKernelArgsStorage<(unsigned long)4096>)"
+    ],
+    "must_not_contain": []
+  }
+}

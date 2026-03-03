@@ -1,0 +1,29 @@
+{
+  "id": "q025",
+  "version": 1,
+  "suite": "agent-iteration",
+  "profile": {
+    "path": "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
+  },
+  "model": {
+    "id": "gemini/gemini-2.5-flash",
+    "family": "gemini",
+    "name": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "test_case": "Show me the gradient accumulation step for the second iteration.",
+  "entrypoint": {
+    "kind": "agent",
+    "command": "run_agent_loop",
+    "args": {
+      "question": "Show me the gradient accumulation step for the second iteration."
+    }
+  },
+  "raw_answer": "I can't directly show you \"the gradient accumulation step\" without a specific kernel name. If you provide the exact kernel name, I can try to navigate to its second occurrence.",
+  "raw_actions": [],
+  "expected_tool_calls": [],
+  "expected_response": {
+    "must_contain": [],
+    "must_not_contain": []
+  }
+}
