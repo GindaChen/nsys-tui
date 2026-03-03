@@ -159,7 +159,7 @@ def collect_kernels(roots: list[dict], out: list[KernelEvent],
     Args:
         roots: JSON node list from ``tree.to_json()``.
         out:   Accumulator list — kernel events are appended here.
-        path:  Dot-separated NVTX ancestor path (built during recursion).
+        path:  NVTX ancestor path with ' > ' separators (built during recursion).
     """
     for n in roots:
         node_path = f"{path} > {n['name']}" if path else n['name']

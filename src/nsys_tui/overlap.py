@@ -142,7 +142,6 @@ def detect_iterations(prof: Profile, device: int,
 
     Returns list of iterations with timing and kernel counts.
     """
-    threads = prof.gpu_threads(device)
     kmap = prof.kernel_map(device)
 
     if not kmap:
@@ -150,14 +149,6 @@ def detect_iterations(prof: Profile, device: int,
 
     pad = int(5e9)
     t = trim or prof.meta.time_range
-    prof.conn.execute("""
-        SELECT text, start, [end] FROM NVTX_EVENTS
-        WHERE text LIKE ? AND [end] > start
-          AND globalTid IN ({})
-          AND start >= ? AND start <= ?
-        ORDER BY start
-    """.format(",".join("?" * len(threads))),
-        (f"%{marker}%", *threads, t[0] - pad, t[1])).fetchall()
 
     # Find the primary thread
     from .tree import _find_primary_thread
