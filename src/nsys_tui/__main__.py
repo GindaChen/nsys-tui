@@ -143,7 +143,7 @@ def _cmd_search(args, _profile):
     with _profile.open(args.profile) as prof:
         trim = _parse_trim(args)
         if args.parent or args.type == "hierarchy":
-            if not args.gpu or not trim:
+            if args.gpu is None or not trim:
                 print("Error: hierarchical search requires --gpu and --trim")
                 return
             results = search_hierarchy(prof, args.parent or "", args.query,

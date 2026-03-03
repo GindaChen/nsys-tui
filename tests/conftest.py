@@ -21,16 +21,20 @@ CREATE TABLE IF NOT EXISTS StringIds (
 
 CREATE TABLE IF NOT EXISTS TARGET_INFO_GPU (
     id              INTEGER PRIMARY KEY,
-    deviceId        INTEGER,
     name            TEXT,
-    totalGlobalMem  INTEGER DEFAULT 0,
+    busLocation     TEXT DEFAULT '',
+    totalMemory     INTEGER DEFAULT 0,
     smCount         INTEGER DEFAULT 0,
-    pciBusId        INTEGER DEFAULT 0
+    chipName        TEXT DEFAULT '',
+    memoryBandwidth INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS TARGET_INFO_CUDA_DEVICE (
-    deviceId INTEGER,
-    name     TEXT
+    gpuId    INTEGER,
+    cudaId   INTEGER,
+    pid      INTEGER DEFAULT 0,
+    uuid     TEXT DEFAULT '',
+    numMultiprocessors INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS CUPTI_ACTIVITY_KIND_KERNEL (
@@ -72,7 +76,10 @@ _NSYS_SEED_SQL = """\
 INSERT INTO StringIds VALUES (1, 'kernel_A'), (2, 'kernel_B');
 
 INSERT INTO TARGET_INFO_GPU VALUES
-    (0, 0, 'NVIDIA Test GPU', 8589934592, 108, 0);
+    (0, 'NVIDIA Test GPU', '0000:00:00.0', 8589934592, 108, 'TestChip', 0);
+
+INSERT INTO TARGET_INFO_CUDA_DEVICE VALUES
+    (0, 0, 100, '', 108);
 
 INSERT INTO CUPTI_ACTIVITY_KIND_KERNEL VALUES
     (100, 0, 7, 1, 1000000, 2000000, 1, 1, 32, 1, 1, 256, 1, 1),
