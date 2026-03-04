@@ -1103,30 +1103,40 @@
                     if (done) break;
                     buffer += decoder.decode(value, { stream: true });
 
-                    // Parse SSE events
+                    // Parse SSE events (format: "event: type\ndata: {...}\n\n")
                     const lines = buffer.split('\n');
                     buffer = lines.pop() || '';
+                    let currentEvent = 'message';
 
                     for (const line of lines) {
+                        if (line.startsWith('event: ')) {
+                            currentEvent = line.slice(7).trim();
+                            continue;
+                        }
                         if (!line.startsWith('data: ')) continue;
                         const data = line.slice(6);
                         if (data === '[DONE]') continue;
                         try {
-                            const evt = JSON.parse(data);
-                            if (evt.type === 'text') {
-                                fullContent += evt.content;
+                            const payload = JSON.parse(data);
+                            if (currentEvent === 'text') {
+                                const chunk = payload.chunk || payload.content || '';
+                                fullContent += chunk;
                                 aiDiv.innerHTML = formatChatContent(fullContent);
                                 document.getElementById('chatMessages').scrollTop =
                                     document.getElementById('chatMessages').scrollHeight;
-                            } else if (evt.type === 'system') {
-                                appendChatMsg('system', evt.content, 'system');
-                            } else if (evt.type === 'done') {
-                                fullContent = evt.content || fullContent;
-                                aiDiv.innerHTML = formatChatContent(fullContent);
-                            } else if (evt.type === 'action') {
-                                executeAIAction(evt);
+                            } else if (currentEvent === 'system') {
+                                appendChatMsg('system', payload.content || '', 'system');
+                            } else if (currentEvent === 'done') {
+                                // done event — may contain usage info
+                                if (payload.content) {
+                                    fullContent = payload.content;
+                                    aiDiv.innerHTML = formatChatContent(fullContent);
+                                }
+                            } else if (currentEvent === 'action') {
+                                executeAIAction(payload);
                             }
                         } catch (e) { /* ignore parse errors in SSE */ }
+                        currentEvent = 'message';  // reset after consuming data
                     }
                 }
 

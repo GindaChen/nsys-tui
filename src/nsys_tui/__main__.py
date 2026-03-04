@@ -254,7 +254,8 @@ def _cmd_perfetto(args, _profile):
 def _cmd_timeline_web(args, _profile):
     from .web import serve_timeline
     with _profile.open(args.profile) as prof:
-        serve_timeline(prof, args.gpu, _parse_trim(args),
+        gpu = args.gpu if args.gpu is not None else (prof.meta.devices[0] if prof.meta.devices else 0)
+        serve_timeline(prof, gpu, _parse_trim(args),
                        port=args.port, open_browser=not args.no_browser)
 
 
@@ -451,7 +452,7 @@ def _build_parser():
 
     # ── timeline-web ──
     p = sub.add_parser("timeline-web", help="Horizontal timeline in browser")
-    _add_gpu_trim(p)
+    _add_gpu_trim(p, gpu_required=False)
     p.add_argument("--port", type=int, default=8144, help="HTTP port (default: 8144)")
     p.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
     p.set_defaults(handler=_cmd_timeline_web)
