@@ -192,3 +192,33 @@ def time_bounds(kernels: list[KernelEvent], trim: tuple[int, int]) -> tuple[int,
     if kernels:
         return min(k.start_ns for k in kernels), max(k.end_ns for k in kernels)
     return trim
+
+
+# ---------------------------------------------------------------------------
+# Merged row packing (Nsight-style "all streams" view)
+# ---------------------------------------------------------------------------
+
+def pack_merged_rows(kernels: list[KernelEvent]) -> list[list[KernelEvent]]:
+    """Bin-pack kernels into minimum non-overlapping rows (greedy first-fit).
+
+    Returns a list of rows, each containing non-overlapping kernels sorted by
+    start_ns. This mirrors Nsight Systems' merged stream view.
+    """
+    sorted_ks = sorted(kernels, key=lambda k: k.start_ns)
+    rows: list[list[KernelEvent]] = []
+    row_ends: list[int] = []  # end_ns of last kernel in each row
+
+    for k in sorted_ks:
+        placed = False
+        for i, end in enumerate(row_ends):
+            if k.start_ns >= end:
+                rows[i].append(k)
+                row_ends[i] = k.end_ns
+                placed = True
+                break
+        if not placed:
+            rows.append([k])
+            row_ends.append(k.end_ns)
+
+    return rows
+

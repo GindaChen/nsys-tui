@@ -32,10 +32,12 @@ _STREAM_COLORS = [
 _NCCL_COLOR = Color.parse("magenta")
 
 
-def _stream_color(stream_idx: int, selected: bool, heat: float, is_nccl: bool) -> Style:
+def _stream_color(stream_idx: int, selected: bool, heat: float,
+                   is_nccl: bool, parity: int = 0) -> Style:
     color = _NCCL_COLOR if is_nccl else _STREAM_COLORS[stream_idx % len(_STREAM_COLORS)]
     bold = selected or heat > 0.7
-    dim = heat < 0.2 and not selected
+    # Alternate brightness for adjacent kernels: even = normal, odd = dimmed
+    dim = (parity % 2 == 1 and not selected) or (heat < 0.2 and not selected)
     return Style(color=color, bold=bold, dim=dim)
 
 
@@ -77,16 +79,28 @@ class TimelineCanvas(Widget):
         self.nvtx_max_depth: int = 0
         self.filter_text: str = ""
         self.min_dur_us: float = 0
-        self.selected_stream_rows: int = 2
+        self.selected_stream_rows: int = 3
         self.default_stream_rows: int = 1
         # Display flags
         self.relative_time: bool = False
         self.show_demangled: bool = False
         self.tick_density: int = 6
+        # Multi-GPU fields
+        self.merged_mode: bool = False
+        self.label_mode: str = "gpu+stream"
+        self.stream_gpu: dict[str, int] = {}
+        self.gpu_kernels: dict[int, list[KernelEvent]] = {}
 
     # ------------------------------------------------------------------
     # Textual rendering
     # ------------------------------------------------------------------
+
+    def _effective_label_w(self) -> int:
+        if self.label_mode == "none":
+            return 0
+        elif self.label_mode == "gpu":
+            return 5  # "G0  " etc.
+        return self.label_w  # "gpu+stream"
 
     def render_line(self, y: int) -> Strip:
         """Return a Strip for each terminal row."""
@@ -94,12 +108,9 @@ class TimelineCanvas(Widget):
         if width <= 0:
             return Strip.blank(width)
         if not self.streams:
-            # Avoid Strip.blank here: segments with a None style can trigger
-            # filter bugs in third-party plugins (e.g. snapshot monochrome
-            # filters). Use an explicit empty Style instead.
             return Strip([Segment(" " * width, Style())])
 
-        label_w = self.label_w
+        label_w = self._effective_label_w()
         timeline_w = max(width - label_w, 1)
 
         # Layout: row 0 = time axis, rows 1..nvtx_max_depth = NVTX, then stream rows
@@ -118,10 +129,23 @@ class TimelineCanvas(Widget):
         if y == nvtx_end:
             return Strip([Segment("─" * width, Style(dim=True))])
 
-        # Stream rows
+        # Stream rows — build layout with GPU separators
         row_y = y - stream_start
         cur_y = 0
+        prev_gpu: int | None = None
+
         for si, stream in enumerate(self.streams):
+            gpu_id = self.stream_gpu.get(stream, 0)
+
+            # GPU separator row between different GPUs
+            if prev_gpu is not None and gpu_id != prev_gpu:
+                if row_y == cur_y:
+                    sep_label = f"─ GPU {gpu_id} "
+                    sep = sep_label + "─" * max(0, width - len(sep_label))
+                    return Strip([Segment(sep, Style(color="bright_white", bold=True))])
+                cur_y += 1
+            prev_gpu = gpu_id
+
             row_h = self.selected_stream_rows if si == self.selected_stream_idx else self.default_stream_rows
             if cur_y <= row_y < cur_y + row_h:
                 is_selected = (si == self.selected_stream_idx)
@@ -231,11 +255,22 @@ class TimelineCanvas(Widget):
             bold=is_selected,
             dim=not is_selected,
         )
+        # Build label based on label_mode
+        gpu_id = self.stream_gpu.get(stream, 0)
+        # stream key format is "gpu:stream_id"
+        stream_id = stream.split(":", 1)[1] if ":" in stream else stream
+        if self.label_mode == "none":
+            label_text = ""
+        elif self.label_mode == "gpu":
+            label_text = f"G{gpu_id}"
+        else:
+            label_text = f"G{gpu_id}:S{stream_id}"
+
         # Only show stream label on the first sub-row
         if within == 0:
-            label_seg = Segment(f"S{stream}".ljust(label_w - 1), label_style)
+            label_seg = Segment(label_text.ljust(label_w - 1) if label_w > 0 else "", label_style)
         else:
-            label_seg = Segment(" " * (label_w - 1), Style())
+            label_seg = Segment(" " * max(0, label_w - 1), Style())
 
         kernels = filter_kernels(
             self.stream_kernels.get(stream, []),
@@ -248,6 +283,7 @@ class TimelineCanvas(Widget):
         # How many label rows do we have above the block row?
         label_row_count = row_h - 1  # row_h=1 → 0 label rows, row_h=2 → 1, row_h=3 → 2, etc.
 
+        kernel_idx = 0  # counter for color alternation
         for k in kernels:
             s_col = int((k.start_ns - self.viewport_start_ns) / max(self.ns_per_col, 1))
             e_col = int((k.end_ns - self.viewport_start_ns) / max(self.ns_per_col, 1))
@@ -258,7 +294,8 @@ class TimelineCanvas(Widget):
             block_w = e_col - s_col + 1
 
             is_at_cursor = is_selected and k.start_ns <= self.cursor_ns <= k.end_ns
-            style = _stream_color(ci, is_at_cursor, k.heat, k.is_nccl)
+            style = _stream_color(ci, is_at_cursor, k.heat, k.is_nccl, parity=kernel_idx)
+            kernel_idx += 1
 
             if is_block_row:
                 # Last row: block bars

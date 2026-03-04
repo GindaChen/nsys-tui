@@ -67,6 +67,7 @@ from .logic import (
     find_kernel_by_name,
     kernel_at_time,
     kernel_index_at_time,
+    pack_merged_rows,
     time_bounds,
     zoom_ns_per_col,
 )
@@ -108,9 +109,18 @@ class NsysTimelineApp(App):
         Binding("d", "toggle_demangled", "Demangled"),
         Binding("h", "toggle_help", "Help"),
         Binding("C", "toggle_config", "Config"),
-        Binding("B", "save_bookmark", "Bookmark"),
+        Binding("P", "toggle_path_mode", "Path mode"),
+        Binding("S", "toggle_merged", "Merged view"),
+        Binding("I", "toggle_labels", "Labels"),
+        Binding("T", "toggle_tick_density", "Ticks", show=False),
+        Binding("home", "jump_start", "Start", show=False),
+        Binding("end", "jump_end", "End", show=False),
+        Binding("g", "jump_to_time", "Jump to ns", show=False),
+        Binding("B", "toggle_bookmark", "Bookmark"),
         Binding("comma", "prev_bookmark", "← bookmark", show=False),
         Binding("full_stop", "next_bookmark", "→ bookmark", show=False),
+        Binding("r", "set_range_start", "Range start", show=False),
+        Binding("R", "set_range_end", "Range end / clear", show=False),
         Binding("apostrophe", "show_bookmark_list", "BM list", show=False),
         Binding("left_square_bracket", "range_start", "[range", show=False),
         Binding("right_square_bracket", "range_end", "range]", show=False),
@@ -139,28 +149,40 @@ class NsysTimelineApp(App):
     def __init__(
         self,
         db_path: str,
-        device: int,
-        trim: tuple[int, int] | None,
+        device: int | list[int] = 0,
+        trim: tuple[int, int] | None = None,
         min_ms: float = 0,
         json_roots: list[dict] | None = None,
     ) -> None:
         super().__init__()
         self._db_path = db_path
-        self._device = device
+        # Support single device int or list of devices
+        if isinstance(device, int):
+            self._devices: list[int] = [device]
+        else:
+            self._devices = list(device)
+        self._device = self._devices[0]  # backward compat for ChatPanel etc.
         self._trim = trim or (0, 0)
 
         # ALL plain attributes MUST be initialized before any reactive is set.
-        # Reactive setters fire watchers immediately, and watchers access these fields.
 
-        # Data
+        # Per-GPU data — keyed by device ID
+        self._gpu_kernels: dict[int, list[KernelEvent]] = {}
+        self._gpu_streams: dict[int, list[str]] = {}
+        self._gpu_stream_kernels: dict[int, dict[str, list[KernelEvent]]] = {}
+        self._gpu_nvtx_spans: dict[int, list] = {}
+        self._gpu_nvtx_max_depth: dict[int, int] = {}
+
+        # Flattened views (for navigation / bottom panel)
         self._kernels: list[KernelEvent] = []
         self._stream_kernels: dict[str, list[KernelEvent]] = {}
-        self._streams: list[str] = []
+        self._streams: list[str] = []  # flat list of "gpu:stream" keys
         self._stream_color_idx: dict[str, int] = {}
+        self._stream_gpu: dict[str, int] = {}  # stream_key -> gpu_id
         self._time_start = 0
         self._time_end = 0
         self._time_span = 1
-        self._is_mounted = False  # guard: DOM not ready until on_mount
+        self._is_mounted = False
 
         # Bookmarks and navigation state
         self._bookmarks: list[dict] = []
@@ -172,11 +194,13 @@ class NsysTimelineApp(App):
         self._relative_time = False
         self._show_demangled = False
         self._logical_mode = False
+        self._merged_mode = False  # S key: merged all-streams view
+        self._label_mode = "gpu+stream"  # I key: "gpu+stream" -> "gpu" -> "none"
 
         # Tick density (cycles: 3 → 6 → 10 → 15)
         self._tick_density = 6
 
-        # Now safe to set reactives (watchers will find all fields above)
+        # Now safe to set reactives
         self.min_dur_us = min_ms * 1000
 
         if json_roots:
@@ -190,21 +214,43 @@ class NsysTimelineApp(App):
     # -------------------------------------------------------------------------
     # Data loading
     # -------------------------------------------------------------------------
-    def _load_from_json(self, json_roots: list[dict]) -> None:
+    def _load_from_json(self, json_roots: list[dict], gpu_id: int = 0) -> None:
+        """Load JSON tree for a single GPU into per-GPU storage."""
         kernels, nvtx_spans = extract_events(json_roots)
-        self._kernels = kernels
+        self._gpu_kernels[gpu_id] = kernels
         streams = collect_streams(kernels)
-        self._streams = streams if streams else ["?"]
-        self._stream_kernels = build_stream_kernels(kernels, self._streams)
-        self._stream_color_idx = {s: i % 7 for i, s in enumerate(self._streams)}
-        self._time_start, self._time_end = time_bounds(kernels, self._trim)
+        self._gpu_streams[gpu_id] = streams if streams else ["?"]
+        self._gpu_stream_kernels[gpu_id] = build_stream_kernels(kernels, self._gpu_streams[gpu_id])
+        self._gpu_nvtx_spans[gpu_id] = nvtx_spans
+        self._gpu_nvtx_max_depth[gpu_id] = max((s.depth for s in nvtx_spans), default=-1) + 1
+
+    def _rebuild_flattened(self) -> None:
+        """Rebuild flattened views from per-GPU data."""
+        self._kernels = []
+        self._streams = []
+        self._stream_kernels = {}
+        self._stream_color_idx = {}
+        self._stream_gpu = {}
+
+        color_idx = 0
+        for gpu_id in sorted(self._gpu_kernels.keys()):
+            gpu_kernels = self._gpu_kernels[gpu_id]
+            self._kernels.extend(gpu_kernels)
+            for s in self._gpu_streams.get(gpu_id, []):
+                key = f"{gpu_id}:{s}"  # unique key "0:21", "1:52" etc.
+                self._streams.append(key)
+                self._stream_kernels[key] = self._gpu_stream_kernels.get(gpu_id, {}).get(s, [])
+                self._stream_color_idx[key] = color_idx % 7
+                self._stream_gpu[key] = gpu_id
+                color_idx += 1
+
+        self._time_start, self._time_end = time_bounds(self._kernels, self._trim)
         self._time_span = max(self._time_end - self._time_start, 1)
-        # initial zoom: fit full trace in ~100 columns
-        self.ns_per_col = max(1, self._time_span // 100)
-        self.cursor_ns = self._time_start
-        # Store nvtx spans on canvas
-        self._nvtx_spans = nvtx_spans
-        self._nvtx_max_depth = max((s.depth for s in nvtx_spans), default=-1) + 1
+        # Merge all nvtx spans
+        self._nvtx_spans = []
+        for spans in self._gpu_nvtx_spans.values():
+            self._nvtx_spans.extend(spans)
+        self._nvtx_max_depth = max(self._gpu_nvtx_max_depth.values(), default=0)
 
     def _load_from_db(self) -> None:
         from .. import profile as _profile
@@ -212,13 +258,23 @@ class NsysTimelineApp(App):
 
         try:
             with _profile.open(self._db_path) as prof:
-                roots = build_nvtx_tree(prof, self._device, self._trim)
-                json_roots = to_json(roots)
+                # Auto-detect devices if none specified or single default 0
+                devices = self._devices
+                if not devices or devices == [0]:
+                    if hasattr(prof, 'meta') and hasattr(prof.meta, 'devices') and prof.meta.devices:
+                        devices = prof.meta.devices
+                        self._devices = devices
+                for dev in devices:
+                    roots = build_nvtx_tree(prof, dev, self._trim)
+                    json_roots = to_json(roots)
+                    self._load_from_json(json_roots, gpu_id=dev)
         except Exception as e:
             self.notify(f"Failed to load profile: {e}", severity="error")
             return
-        self._load_from_json(json_roots)
-        # Push NVTX spans to bottom panel for hierarchy view
+        self._rebuild_flattened()
+        # initial zoom: fit full trace in ~100 columns
+        self.ns_per_col = max(1, self._time_span // 100)
+        self.cursor_ns = self._time_start
         if self._is_mounted:
             self.query_one("#bottom-panel", BottomPanel).set_nvtx_spans(
                 getattr(self, "_nvtx_spans", [])
@@ -254,7 +310,9 @@ class NsysTimelineApp(App):
         if not self._kernels and self._db_path:
             self._load_from_db()
         else:
-            # Push NVTX spans to bottom panel for hierarchy view
+            self._rebuild_flattened()
+            self.ns_per_col = max(1, self._time_span // 100)
+            self.cursor_ns = self._time_start
             self.query_one("#bottom-panel", BottomPanel).set_nvtx_spans(
                 getattr(self, "_nvtx_spans", [])
             )
@@ -298,6 +356,10 @@ class NsysTimelineApp(App):
             tick_density=self._tick_density,
             selected_stream_rows=selected_rows,
             default_stream_rows=default_rows,
+            merged_mode=self._merged_mode,
+            label_mode=self._label_mode,
+            stream_gpu=self._stream_gpu,
+            gpu_kernels=self._gpu_kernels,
         )
         self._update_bottom_panel()
 
@@ -311,8 +373,9 @@ class NsysTimelineApp(App):
         bm_indicator = f"  📌{len(self._bookmarks)}" if self._bookmarks else ""
         filter_indicator = f"  /{self.filter_text}" if self.filter_text else ""
         min_dur_indicator = f"  ≥{int(self.min_dur_us)}μs" if self.min_dur_us else ""
+        gpu_str = ",".join(str(d) for d in self._devices)
         self.title = (
-            f"nsys-ai Timeline  GPU {self._device}  {trim_s}  "
+            f"nsys-ai Timeline  GPU {gpu_str}  {trim_s}  "
             f"{kernel_count} kernels  @ {_fmt_ns(self.cursor_ns)}{k_info}  "
             f"[{mode}]{bm_indicator}{filter_indicator}{min_dur_indicator}"
         )
@@ -452,6 +515,20 @@ class NsysTimelineApp(App):
         self._update_bottom_panel()
         mode = bp._path_mode
         self.notify(f"Path: {mode}", timeout=2)
+
+    def action_toggle_merged(self) -> None:
+        """Toggle merged all-streams view ('S' key)."""
+        self._merged_mode = not self._merged_mode
+        self._push_canvas_state()
+        self.notify(f"View: {'merged' if self._merged_mode else 'per-stream'}", timeout=2)
+
+    def action_toggle_labels(self) -> None:
+        """Cycle label visibility: gpu+stream → gpu → none ('I' key)."""
+        modes = ["gpu+stream", "gpu", "none"]
+        idx = modes.index(self._label_mode)
+        self._label_mode = modes[(idx + 1) % len(modes)]
+        self._push_canvas_state()
+        self.notify(f"Labels: {self._label_mode}", timeout=2)
 
     def action_toggle_demangled(self) -> None:
         self._show_demangled = not self._show_demangled
