@@ -748,12 +748,27 @@
             try {
                 const metaResp = await fetch('/api/meta');
                 profileMeta = await metaResp.json();
-                // Default view: first 5 seconds (from t=0)
-                const firstEnd = TILE_WINDOW_S;
-                await fetchTile(0, firstEnd);
-                rebuildDataFromCache();
-                viewStart = 0;
-                viewEnd = firstEnd * 1e9;
+                // Check for saved viewport
+                let restored = false;
+                try {
+                    const saved = JSON.parse(localStorage.getItem(_viewKey));
+                    if (saved && saved.s !== undefined && saved.e !== undefined) {
+                        // Load tiles for saved viewport
+                        await ensureTilesForView(saved.s, saved.e);
+                        rebuildDataFromCache();
+                        viewStart = saved.s;
+                        viewEnd = saved.e;
+                        restored = true;
+                    }
+                } catch (e) { }
+                if (!restored) {
+                    // Default view: first 5 seconds
+                    const firstEnd = TILE_WINDOW_S;
+                    await fetchTile(0, firstEnd);
+                    rebuildDataFromCache();
+                    viewStart = 0;
+                    viewEnd = firstEnd * 1e9;
+                }
                 hideLoading();
                 resize();
                 prefetchAdjacent();
@@ -1137,7 +1152,10 @@
         // ── Navigation ──
         // ── Progressive tile loading on viewport change ──
         let _viewChangeTimer = null;
+        const _viewKey = 'timeline-view-' + '$GPU_LABEL'.replace(/[^a-zA-Z0-9]/g, '_');
         function afterViewChange() {
+            // Persist viewport to localStorage
+            try { localStorage.setItem(_viewKey, JSON.stringify({ s: viewStart, e: viewEnd, t: Date.now() })); } catch (e) { }
             if (!PROGRESSIVE) return;
             clearTimeout(_viewChangeTimer);
             _viewChangeTimer = setTimeout(async () => {
