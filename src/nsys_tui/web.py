@@ -131,6 +131,7 @@ class _ViewerHandler(BaseHTTPRequestHandler):
     html_bytes: bytes = b""
     prof = None           # set by serve_timeline
     devices: list = []    # set by serve_timeline
+    _prebuilt_data: list = []  # pre-built full NVTX tree per GPU
 
     def do_GET(self):
         path = self.path.split("?")[0]
@@ -179,13 +180,11 @@ class _ViewerHandler(BaseHTTPRequestHandler):
         })
 
     def _handle_data(self):
-        """Return kernel/NVTX data for a requested time window."""
+        """Return kernel/NVTX data for a requested time window (from pre-built cache)."""
         from urllib.parse import urlparse, parse_qs
-        from .viewer import generate_timeline_data_json
-        prof = self.__class__.prof
-        devices = self.__class__.devices
-        if not prof:
-            self._json_response({"error": "no profile"}, 500)
+        prebuilt = self.__class__._prebuilt_data
+        if not prebuilt:
+            self._json_response({"error": "no prebuilt data"}, 500)
             return
         qs = parse_qs(urlparse(self.path).query)
         try:
@@ -193,14 +192,20 @@ class _ViewerHandler(BaseHTTPRequestHandler):
             end_s = float(qs.get("end_s", [5])[0])
         except (ValueError, IndexError):
             start_s, end_s = 0, 5
-        trim_ns = (int(start_s * 1e9), int(end_s * 1e9))
+        start_ns = int(start_s * 1e9)
+        end_ns = int(end_s * 1e9)
         t0 = _time.monotonic()
-        print(f"[tile] {start_s:.1f}s–{end_s:.1f}s  loading...", flush=True)
+        print(f"[tile] {start_s:.1f}s–{end_s:.1f}s  filtering...", flush=True)
         try:
-            data_json = generate_timeline_data_json(prof, devices, trim_ns)
+            # Filter pre-built data by time window
+            gpu_entries = []
+            for gpu_data in prebuilt:
+                filtered = _filter_nodes_by_time(gpu_data["data"], start_ns, end_ns)
+                gpu_entries.append({"id": gpu_data["id"], "data": filtered})
+            data_json = json.dumps({"gpus": gpu_entries})
             body = data_json.encode("utf-8")
             elapsed = _time.monotonic() - t0
-            print(f"[tile] {start_s:.1f}s–{end_s:.1f}s  done in {elapsed:.2f}s  ({len(body)//1024}KB)", flush=True)
+            print(f"[tile] {start_s:.1f}s–{end_s:.1f}s  done in {elapsed:.3f}s  ({len(body)//1024}KB)", flush=True)
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -297,6 +302,23 @@ def serve(prof, device: int, trim: tuple[int, int], *,
 
 # ── Mode 2: Horizontal timeline viewer ──────────────────────────
 
+def _filter_nodes_by_time(nodes: list, start_ns: int, end_ns: int) -> list:
+    """Filter a tree of nodes, keeping only those overlapping [start_ns, end_ns]."""
+    result = []
+    for node in nodes:
+        ns = node.get("start_ns", 0)
+        ne = node.get("end_ns", 0)
+        # Skip if entirely outside the window
+        if ne < start_ns or ns > end_ns:
+            continue
+        # Include this node; recursively filter children
+        filtered = dict(node)
+        if "children" in filtered and filtered["children"]:
+            filtered["children"] = _filter_nodes_by_time(filtered["children"], start_ns, end_ns)
+        result.append(filtered)
+    return result
+
+
 def serve_timeline(prof, device, trim: tuple[int, int] | None = None, *,
                    port: int = 8144, open_browser: bool = True):
     """Start a local HTTP server serving the horizontal timeline viewer.
@@ -305,9 +327,10 @@ def serve_timeline(prof, device, trim: tuple[int, int] | None = None, *,
     the client can freely navigate via /api/data.
     """
     from typing import Sequence
+    from .nvtx_tree import build_nvtx_tree, to_json
     devices: list[int] = list(device) if isinstance(device, Sequence) else [device]
 
-    # Store prof + devices on handler for /api/data queries
+    # Store prof + devices on handler for /api/meta queries
     _ViewerHandler.prof = prof
     _ViewerHandler.devices = devices
 
@@ -319,6 +342,24 @@ def serve_timeline(prof, device, trim: tuple[int, int] | None = None, *,
         html = generate_timeline_html(prof, devices, None)
 
     _ViewerHandler.html_bytes = html.encode("utf-8")
+
+    # Pre-build full NVTX tree for all GPUs (progressive mode)
+    if trim is None:
+        t0 = _time.monotonic()
+        full_range = prof.meta.time_range
+        print(f"Pre-building NVTX tree for {len(devices)} GPU(s) "
+              f"({full_range[0]/1e9:.1f}s–{full_range[1]/1e9:.1f}s)...", flush=True)
+        prebuilt = []
+        for dev in devices:
+            dt = _time.monotonic()
+            roots = build_nvtx_tree(prof, dev, full_range)
+            tree_json = to_json(roots)
+            elapsed_dev = _time.monotonic() - dt
+            print(f"  GPU {dev}: {len(tree_json)} roots, {elapsed_dev:.1f}s", flush=True)
+            prebuilt.append({"id": dev, "data": tree_json})
+        elapsed = _time.monotonic() - t0
+        print(f"Pre-build complete in {elapsed:.1f}s", flush=True)
+        _ViewerHandler._prebuilt_data = prebuilt
 
     server = _ThreadedHTTPServer(("127.0.0.1", port), _ViewerHandler)
     actual_url = f"http://127.0.0.1:{server.server_address[1]}"

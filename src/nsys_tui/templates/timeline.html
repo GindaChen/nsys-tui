@@ -1071,14 +1071,15 @@
                     }
 
                     // Kernel name label
-                    if (w > 30) {
+                    if (w > 20) {
                         ctx.fillStyle = isSel ? '#fff' : (searchQuery && !isMatch ? '#555' : '#1c1c1c');
                         ctx.textAlign = 'left';
                         ctx.textBaseline = 'middle';
                         ctx.save();
                         ctx.beginPath(); ctx.rect(x1 + 1, bY, w - 2, bH); ctx.clip();
-                        const short = k.name.length > 30 ? k.name.slice(0, 28) + '…' : k.name;
-                        const label = w > 100 ? short + ' ' + fmtDur(k.duration_ms) : w > 60 ? fmtDur(k.duration_ms) : '';
+                        const short = k.name.length > 40 ? k.name.slice(0, 38) + '…' : k.name;
+                        // Name first, duration only if space
+                        const label = w > 100 ? short + ' ' + fmtDur(k.duration_ms) : short;
                         if (label) ctx.fillText(label, x1 + 3, bY + bH / 2);
                         ctx.restore();
                     }
@@ -1303,8 +1304,8 @@
 
         canvas.addEventListener('wheel', e => {
             e.preventDefault();
-            if (e.shiftKey) {
-                // Shift+scroll = zoom
+            if (e.shiftKey || e.ctrlKey) {
+                // Shift+scroll or pinch (ctrlKey on Mac) = zoom
                 const rect = canvas.getBoundingClientRect();
                 const mx = e.clientX - rect.left;
                 const ns = xToNs(mx);
