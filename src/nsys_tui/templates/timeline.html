@@ -520,17 +520,7 @@
             put(startS, endS, data) {
                 const k = this.key(startS, endS);
                 const sizeEst = JSON.stringify(data).length * 2;  // rough byte estimate
-                // Evict oldest if over budget
-                while (this.currentBytes + sizeEst > this.maxBytes && this.tiles.size > 0) {
-                    let oldest = null, oldestKey = null;
-                    for (const [key, entry] of this.tiles) {
-                        if (!oldest || entry.ts < oldest.ts) { oldest = entry; oldestKey = key; }
-                    }
-                    if (oldestKey) {
-                        this.currentBytes -= this.tiles.get(oldestKey).sizeEst;
-                        this.tiles.delete(oldestKey);
-                    }
-                }
+                // No eviction — tiles are small with pre-built server cache
                 this.tiles.set(k, { data, ts: Date.now(), sizeEst });
                 this.currentBytes += sizeEst;
             }
