@@ -181,7 +181,7 @@ class _ViewerHandler(BaseHTTPRequestHandler):
 
     def _handle_data(self):
         """Return kernel/NVTX data for a requested time window (from pre-built cache)."""
-        from urllib.parse import urlparse, parse_qs
+        from urllib.parse import parse_qs, urlparse
         prebuilt = self.__class__._prebuilt_data
         if not prebuilt:
             self._json_response({"error": "no prebuilt data"}, 500)
@@ -326,7 +326,8 @@ def serve_timeline(prof, device, trim: tuple[int, int] | None = None, *,
     If *trim* is None, the initial view shows a default 5s window and
     the client can freely navigate via /api/data.
     """
-    from typing import Sequence
+    from collections.abc import Sequence
+
     from .nvtx_tree import build_nvtx_tree, to_json
     devices: list[int] = list(device) if isinstance(device, Sequence) else [device]
 
@@ -345,7 +346,7 @@ def serve_timeline(prof, device, trim: tuple[int, int] | None = None, *,
 
     # Pre-build full NVTX tree for all GPUs (progressive mode)
     if trim is None:
-        import os, hashlib
+        import os
         db_path = prof.path if hasattr(prof, 'path') else ''
         cache_path = db_path + '.timeline-cache.json' if db_path else ''
         cache_valid = False
@@ -358,7 +359,7 @@ def serve_timeline(prof, device, trim: tuple[int, int] | None = None, *,
                 if cache_mtime >= src_mtime:
                     t0 = _time.monotonic()
                     print(f"Loading cached NVTX tree from {os.path.basename(cache_path)}...", flush=True)
-                    with open(cache_path, 'r') as f:
+                    with open(cache_path) as f:
                         prebuilt = json.loads(f.read())
                     elapsed = _time.monotonic() - t0
                     print(f"Cache loaded in {elapsed:.2f}s ({os.path.getsize(cache_path) // 1024}KB)", flush=True)

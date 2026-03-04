@@ -8,8 +8,9 @@ Run with:
     .venv/bin/python scripts/functional_test_tree.py  <sqlite_path>
 """
 from __future__ import annotations
-import asyncio, sys, traceback, textwrap
-from typing import Callable
+
+import asyncio
+import sys
 
 PROFILE = "data/nsys-hero/distca-0/baseline.t128k.host-fs-mbz-gpu-899.sqlite"
 
@@ -42,8 +43,9 @@ def check(name: str, passed: bool, detail: str = "") -> None:
 
 
 async def run_tree_tests():
-    from nsys_ai.tree.app import NsysTreeApp
     from textual.widgets import DataTable
+
+    from nsys_ai.tree.app import NsysTreeApp
 
     print("\n── NsysTreeApp functional test ──────────────────────────────────\n")
 
@@ -235,8 +237,8 @@ async def run_tree_tests():
 async def run_timeline_tests():
     from nsys_ai.timeline.app import NsysTimelineApp
     from nsys_ai.timeline.canvas import TimelineCanvas
+    from nsys_ai.timeline.widgets import ConfigPanel
     from nsys_ai.tree.chat import ChatPanel
-    from nsys_ai.timeline.widgets import ConfigPanel, TimelineBookmarkPanel
 
     SAMPLE = [
         {"name": "forward", "type": "nvtx", "duration_ms": 100.0, "heat": 0.5,

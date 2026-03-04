@@ -67,7 +67,6 @@ from .logic import (
     find_kernel_by_name,
     kernel_at_time,
     kernel_index_at_time,
-    pack_merged_rows,
     time_bounds,
     zoom_ns_per_col,
 )

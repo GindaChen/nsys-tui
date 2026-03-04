@@ -59,7 +59,7 @@ def generate_timeline_data_json(prof, devices, trim: tuple[int, int]) -> str:
 
     Called by the ``/api/data`` endpoint for on-demand tile loading.
     """
-    from typing import Sequence
+    from collections.abc import Sequence
     if not isinstance(devices, Sequence):
         devices = [devices]
 
@@ -79,7 +79,7 @@ def generate_timeline_html(prof, device, trim: tuple[int, int] | None = None) ->
     When *trim* is None, HTML is generated in progressive mode: ``$DATA``
     is ``null`` and the template fetches data via ``/api/data`` on demand.
     """
-    from typing import Sequence
+    from collections.abc import Sequence
     devices: list[int] = list(device) if isinstance(device, Sequence) else [device]
 
     # Build GPU info list (for dropdown) and compact label
