@@ -297,6 +297,7 @@
         let gpuBands = [];
         let timeStart = 0, timeEnd = 1, timeSpan = 1;
         let nvtxMaxDepth = 0;
+        let nvtxDepthByGpu = new Map();
 
         function rebuildDataFromCache() {
             // Clear and rebuild from all cached tiles (progressive) or from baked data
@@ -347,6 +348,13 @@
 
             // NVTX depth
             nvtxMaxDepth = nvtxSpans.length ? Math.min(6, Math.max(...nvtxSpans.map(s => s.depth)) + 1) : 0;
+            nvtxDepthByGpu = new Map();
+            for (const s of nvtxSpans) {
+                const gpu = s.gpu;
+                const d = Math.min(6, (s.depth || 0) + 1);
+                const prev = nvtxDepthByGpu.get(gpu) || 0;
+                if (d > prev) nvtxDepthByGpu.set(gpu, d);
+            }
 
             // Stats
             const totalKernels = kernels.length;
@@ -476,9 +484,27 @@
             return { activeGpu, thread, spans: filtered };
         }
 
+        function nvtxLoadingForGpu(gpuId) {
+            if (gpuId === null || gpuId === undefined) return false;
+            const suffix = `|gpu:${gpuId}`;
+            for (const key of nvtxInflight) {
+                if (key.endsWith(suffix)) return true;
+            }
+            return false;
+        }
+
         function activeNvtxMaxDepth() {
-            const { spans } = activeNvtxSpans();
-            return spans.length ? Math.min(6, Math.max(...spans.map(s => s.depth || 0)) + 1) : 0;
+            const { activeGpu, spans } = activeNvtxSpans();
+            if (spans.length) {
+                return Math.min(6, Math.max(...spans.map(s => s.depth || 0)) + 1);
+            }
+            const cachedDepth = activeGpu !== null && activeGpu !== undefined
+                ? (nvtxDepthByGpu.get(activeGpu) || 0)
+                : 0;
+            if (showNVTX && nvtxLoadingForGpu(activeGpu)) {
+                return Math.max(1, cachedDepth);
+            }
+            return cachedDepth;
         }
 
         function updateNvtxThreadOptions() {
@@ -652,6 +678,15 @@
                 ctx.font = '9px SF Mono, monospace';
                 ctx.fillText('L' + d, LABEL_W - 6, baseY + d * NVTX_ROW_H + NVTX_ROW_H / 2);
             }
+
+            if (!visibleSpans.length && nvtxLoadingForGpu(activeGpu) && depthMax > 0) {
+                ctx.fillStyle = '#d4a72c';
+                ctx.font = '10px SF Mono, monospace';
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('Loading NVTX…', LABEL_W + 8, baseY + NVTX_ROW_H / 2);
+            }
+
             // Show which GPU/thread NVTX is displayed
             if (depthMax > 0) {
                 ctx.fillStyle = GPU_SEP_COLORS[gpuIds.indexOf(activeGpu) % GPU_SEP_COLORS.length];
