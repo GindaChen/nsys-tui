@@ -545,12 +545,17 @@
                 const k = this.key(startS, endS);
                 const entry = this.tiles.get(k);
                 if (!entry || !entry.data || !entry.data.gpus || !nvtxData || !nvtxData.gpus) return;
+                let mergedTargetGpu = false;
                 for (const ng of nvtxData.gpus) {
+                    if (ng.id !== gpuId) continue;
                     const eg = entry.data.gpus.find(g => g.id === ng.id);
                     if (!eg) continue;
                     if (Array.isArray(ng.nvtx_spans)) eg.nvtx_spans = ng.nvtx_spans;
+                    mergedTargetGpu = true;
                 }
-                this.markNvtx(startS, endS, gpuId);
+                if (mergedTargetGpu) {
+                    this.markNvtx(startS, endS, gpuId);
+                }
             }
             // Get all cached data merged
             allData() {
