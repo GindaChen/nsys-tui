@@ -20,6 +20,13 @@ def _load_template(name: str) -> Template:
         return Template(f.read())
 
 
+def _read_template_text(name: str) -> str:
+    """Read a raw template/static file from templates directory."""
+    path = os.path.join(_TEMPLATE_DIR, name)
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
 def generate_html(prof, device: int, trim: tuple[int, int]) -> str:
     """Generate a standalone HTML page showing the NVTX stack trace."""
     roots = build_nvtx_tree(prof, device, trim)
@@ -166,7 +173,14 @@ def generate_timeline_data_json(prof, devices, trim: tuple[int, int]) -> str:
     return json.dumps({"gpus": gpu_entries})
 
 
-def generate_timeline_html(prof, device, trim: tuple[int, int] | None = None) -> str:
+def generate_timeline_html(
+    prof,
+    device,
+    trim: tuple[int, int] | None = None,
+    *,
+    timeline_css_href: str = "/assets/timeline.css",
+    timeline_js_src: str = "/assets/timeline.js",
+) -> str:
     """Generate a standalone HTML page with the horizontal timeline viewer.
 
     *device* may be a single int or a list of ints.
@@ -191,6 +205,7 @@ def generate_timeline_html(prof, device, trim: tuple[int, int] | None = None) ->
         gpu_details.append(detail)
     gpu_info_json = json.dumps(gpu_details)
     gpu_label = f"{len(devices)}× {gpu_type}" if len(devices) > 1 else gpu_type
+    gpu_label_json = json.dumps(gpu_label)
 
     if trim is not None:
         # Full data baked into HTML (kernel-first payload).
@@ -208,13 +223,35 @@ def generate_timeline_html(prof, device, trim: tuple[int, int] | None = None) ->
     return tmpl.safe_substitute(
         DATA=data_json,
         GPU_LABEL=gpu_label,
+        GPU_LABEL_JSON=gpu_label_json,
         GPU_INFO_JSON=gpu_info_json,
         TRIM_LABEL=trim_label,
         PROGRESSIVE=progressive,
+        TIMELINE_CSS_HREF=timeline_css_href,
+        TIMELINE_JS_SRC=timeline_js_src,
     )
 
 
 def write_timeline_html(prof, device: int, trim: tuple[int, int], path: str):
     """Generate and write the timeline HTML viewer to a file."""
+    out_dir = os.path.dirname(os.path.abspath(path))
+    css_name = "timeline.css"
+    js_name = "timeline.js"
+    os.makedirs(out_dir, exist_ok=True)
+
     with open(path, "w", encoding="utf-8", newline="\n") as f:
-        f.write(generate_timeline_html(prof, device, trim))
+        f.write(
+            generate_timeline_html(
+                prof,
+                device,
+                trim,
+                timeline_css_href=css_name,
+                timeline_js_src=js_name,
+            )
+        )
+
+    # Export sidecar static assets so generated HTML remains self-contained on disk.
+    with open(os.path.join(out_dir, css_name), "w", encoding="utf-8", newline="\n") as f:
+        f.write(_read_template_text("timeline.css"))
+    with open(os.path.join(out_dir, js_name), "w", encoding="utf-8", newline="\n") as f:
+        f.write(_read_template_text("timeline.js"))

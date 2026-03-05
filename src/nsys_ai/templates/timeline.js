@@ -1,0 +1,1522 @@
+        const BOOT = window.__TIMELINE_BOOTSTRAP__ || {};
+        const INITIAL_DATA = BOOT.INITIAL_DATA ?? null;
+        const PROGRESSIVE = BOOT.PROGRESSIVE === true;
+        const TILE_WINDOW_S = Number.isFinite(BOOT.TILE_WINDOW_S) ? BOOT.TILE_WINDOW_S : 5;  // seconds per tile
+        const GPU_INFO = Array.isArray(BOOT.GPU_INFO) ? BOOT.GPU_INFO : [];
+
+        const canvas = document.getElementById('c');
+        const ctx = canvas.getContext('2d');
+        const wrap = document.getElementById('canvasWrap');
+
+        // ── Tile Cache ──
+        class TileCache {
+            constructor(maxBytes = 100 * 1024 * 1024) {
+                this.tiles = new Map();  // key "start_s-end_s" → {data, ts, sizeEst}
+                this.maxBytes = maxBytes;
+                this.currentBytes = 0;
+                this.nvtxReady = new Set();
+            }
+            key(startS, endS) { return `${startS.toFixed(1)}-${endS.toFixed(1)}`; }
+            has(startS, endS) { return this.tiles.has(this.key(startS, endS)); }
+            nvtxKey(startS, endS, gpuId) { return `${this.key(startS, endS)}|gpu:${gpuId}`; }
+            hasNvtx(startS, endS, gpuId) { return this.nvtxReady.has(this.nvtxKey(startS, endS, gpuId)); }
+            markNvtx(startS, endS, gpuId) { this.nvtxReady.add(this.nvtxKey(startS, endS, gpuId)); }
+            get(startS, endS) {
+                const k = this.key(startS, endS);
+                const entry = this.tiles.get(k);
+                if (entry) entry.ts = Date.now();
+                return entry ? entry.data : null;
+            }
+            put(startS, endS, data) {
+                const k = this.key(startS, endS);
+                const sizeEst = JSON.stringify(data).length * 2;  // rough byte estimate
+                // No eviction — tiles are small with pre-built server cache
+                this.tiles.set(k, { data, ts: Date.now(), sizeEst });
+                this.currentBytes += sizeEst;
+            }
+            mergeNvtx(startS, endS, nvtxData, gpuId) {
+                const k = this.key(startS, endS);
+                const entry = this.tiles.get(k);
+                if (!entry || !entry.data || !entry.data.gpus || !nvtxData || !nvtxData.gpus) return;
+                let mergedTargetGpu = false;
+                for (const ng of nvtxData.gpus) {
+                    if (ng.id !== gpuId) continue;
+                    const eg = entry.data.gpus.find(g => g.id === ng.id);
+                    if (!eg) continue;
+                    if (Array.isArray(ng.nvtx_spans)) eg.nvtx_spans = ng.nvtx_spans;
+                    mergedTargetGpu = true;
+                }
+                if (mergedTargetGpu) {
+                    this.markNvtx(startS, endS, gpuId);
+                }
+            }
+            // Get all cached data merged
+            allData() {
+                const merged = { gpus: [] };
+                const gpuMap = {};
+                for (const [, entry] of this.tiles) {
+                    if (!entry.data || !entry.data.gpus) continue;
+                    for (const gpu of entry.data.gpus) {
+                        if (gpu.kernels) {
+                            if (gpuMap[gpu.id] === undefined) {
+                                gpuMap[gpu.id] = merged.gpus.length;
+                                merged.gpus.push({ id: gpu.id, kernels: [], nvtx_spans: [] });
+                            }
+                            const idx = gpuMap[gpu.id];
+                            merged.gpus[idx].kernels.push(...(gpu.kernels || []));
+                            merged.gpus[idx].nvtx_spans.push(...(gpu.nvtx_spans || []));
+                        } else {
+                            if (gpuMap[gpu.id] === undefined) {
+                                gpuMap[gpu.id] = merged.gpus.length;
+                                merged.gpus.push({ id: gpu.id, data: [] });
+                            }
+                            const idx = gpuMap[gpu.id];
+                            merged.gpus[idx].data.push(...(gpu.data || []));
+                        }
+                    }
+                }
+                // De-duplicate entries that appear in adjacent tiles.
+                for (const g of merged.gpus) {
+                    if (!g.kernels) continue;
+                    const kSeen = new Set();
+                    g.kernels = g.kernels.filter(k => {
+                        const key = `${k.start_ns}|${k.end_ns}|${k.stream}|${k.name}`;
+                        if (kSeen.has(key)) return false;
+                        kSeen.add(key);
+                        return true;
+                    });
+                    const nSeen = new Set();
+                    g.nvtx_spans = g.nvtx_spans.filter(s => {
+                        const key = `${s.start}|${s.end}|${s.depth}|${s.path}|${s.thread || ''}`;
+                        if (nSeen.has(key)) return false;
+                        nSeen.add(key);
+                        return true;
+                    });
+                }
+                return merged;
+            }
+        }
+        const tileCache = new TileCache();
+        const nvtxInflight = new Set();
+        let profileMeta = null;  // {time_range_ns, gpus, device_ids}
+        let isLoading = false;
+
+        // ── Loading overlay ──
+        function showLoading(msg) {
+            let overlay = document.getElementById('loadingOverlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'loadingOverlay';
+                overlay.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;background:rgba(13,17,23,0.8);color:#79b8ff;font-size:14px;z-index:100;pointer-events:none;';
+                wrap.style.position = 'relative';
+                wrap.appendChild(overlay);
+            }
+            overlay.textContent = msg || 'Loading…';
+            overlay.style.display = 'flex';
+        }
+        function hideLoading() {
+            const overlay = document.getElementById('loadingOverlay');
+            if (overlay) overlay.style.display = 'none';
+        }
+
+        // ── Fetch data for a time window ──
+        async function fetchTile(startS, endS, { requestNvtx = false } = {}) {
+            if (tileCache.has(startS, endS)) return tileCache.get(startS, endS);
+            const resp = await fetch(`/api/data?start_s=${startS}&end_s=${endS}&kernels=1&nvtx=0`);
+            const data = await resp.json();
+            if (data.error) { console.error('fetchTile error:', data.error); return null; }
+            tileCache.put(startS, endS, data);
+            if (requestNvtx && showNVTX) void fetchTileNvtx(startS, endS, currentActiveGpuId());
+            return data;
+        }
+
+        function currentActiveGpuId() {
+            if (isMultiGPU && streamIds[selectedStreamIdx]) {
+                const parts = String(streamIds[selectedStreamIdx]).split(':');
+                const maybeGpu = parseInt(parts[0], 10);
+                if (!isNaN(maybeGpu)) return maybeGpu;
+            }
+            if (gpuIds.length > 0) return gpuIds[0];
+            if (profileMeta && Array.isArray(profileMeta.device_ids) && profileMeta.device_ids.length > 0) {
+                return profileMeta.device_ids[0];
+            }
+            return null;
+        }
+
+        async function fetchTileNvtx(startS, endS, gpuId) {
+            const key = `${tileCache.key(startS, endS)}|gpu:${gpuId}`;
+            if (tileCache.hasNvtx(startS, endS, gpuId) || nvtxInflight.has(key)) return;
+            nvtxInflight.add(key);
+            updateNvtxLoadingIndicator();
+            try {
+                const resp = await fetch(`/api/data?start_s=${startS}&end_s=${endS}&kernels=0&nvtx=1&gpu=${gpuId}`);
+                const data = await resp.json();
+                if (data.error) { console.error('fetchTileNvtx error:', data.error); return; }
+                tileCache.mergeNvtx(startS, endS, data, gpuId);
+                rebuildDataFromCache();
+                draw();
+            } finally {
+                nvtxInflight.delete(key);
+                updateNvtxLoadingIndicator();
+            }
+        }
+
+        function updateNvtxLoadingIndicator() {
+            const el = document.getElementById('nvtxLoading');
+            const text = document.getElementById('nvtxLoadingText');
+            if (!el || !text) return;
+            const active = showNVTX && nvtxInflight.size > 0;
+            el.style.display = active ? 'inline-flex' : 'none';
+            if (active) {
+                text.textContent = `NVTX loading… (${nvtxInflight.size})`;
+            }
+        }
+
+        // ── Quantize view to tile boundaries ──
+        function tileBounds(ns) {
+            const s = ns / 1e9;
+            const startS = Math.floor(s / TILE_WINDOW_S) * TILE_WINDOW_S;
+            return [startS, startS + TILE_WINDOW_S];
+        }
+
+        // ── Load tiles covering the current viewport ──
+        async function ensureTilesForView(vStart, vEnd) {
+            const startTile = tileBounds(vStart);
+            const endTile = tileBounds(vEnd);
+            const promises = [];
+            for (let s = startTile[0]; s < endTile[1]; s += TILE_WINDOW_S) {
+                if (!tileCache.has(s, s + TILE_WINDOW_S)) {
+                    promises.push(fetchTile(s, s + TILE_WINDOW_S));
+                }
+            }
+            if (promises.length > 0) {
+                isLoading = true;
+                showLoading(`Loading ${promises.length} tile${promises.length > 1 ? 's' : ''}…`);
+                await Promise.all(promises);
+                isLoading = false;
+                hideLoading();
+                rebuildDataFromCache();
+            }
+            if (showNVTX) {
+                maybeFetchNvtxForCurrentView();
+            }
+        }
+
+        function maybeFetchNvtxForCurrentView() {
+            if (!PROGRESSIVE || !showNVTX) return;
+            const startTile = tileBounds(viewStart);
+            const endTile = tileBounds(viewEnd);
+            const activeGpu = currentActiveGpuId();
+            if (activeGpu === null || activeGpu === undefined) return;
+            for (let s = startTile[0]; s < endTile[1]; s += TILE_WINDOW_S) {
+                if (tileCache.has(s, s + TILE_WINDOW_S)) {
+                    void fetchTileNvtx(s, s + TILE_WINDOW_S, activeGpu);
+                }
+            }
+        }
+
+        // ── Background prefetch ±1 tile on idle ──
+        function prefetchAdjacent() {
+            if (!PROGRESSIVE || typeof requestIdleCallback === 'undefined') return;
+            requestIdleCallback(() => {
+                const startTile = tileBounds(viewStart);
+                const endTile = tileBounds(viewEnd);
+                // Prefetch one tile before and after
+                const before = [startTile[0] - TILE_WINDOW_S, startTile[0]];
+                const after = [endTile[1], endTile[1] + TILE_WINDOW_S];
+                if (profileMeta) {
+                    const pStartS = profileMeta.time_range_ns[0] / 1e9;
+                    const pEndS = profileMeta.time_range_ns[1] / 1e9;
+                    if (before[0] >= pStartS && !tileCache.has(before[0], before[1])) {
+                        fetchTile(before[0], before[1], { requestNvtx: false }).then(() => { rebuildDataFromCache(); draw(); });
+                    }
+                    if (after[1] <= pEndS && !tileCache.has(after[0], after[1])) {
+                        fetchTile(after[0], after[1], { requestNvtx: false }).then(() => { rebuildDataFromCache(); draw(); });
+                    }
+                }
+            });
+        }
+
+        // ── Data extraction (multi-GPU aware) ──
+        let allNodes = []; let kernels = []; let nvtxSpans = [];
+        let gpuIds = [];
+        let isMultiGPU = false;
+
+        function extractData(nodes, path, depth, gpuId) {
+            for (const n of nodes) {
+                const np = path ? path + ' > ' + n.name : n.name;
+                n._path = np; n._depth = depth; n._gpu = gpuId;
+                allNodes.push(n);
+                if (n.type === 'kernel') { n._path = np; kernels.push(n); }
+                else if (n.type === 'nvtx' && n.start_ns && n.end_ns) {
+                    nvtxSpans.push({ name: n.name, start: n.start_ns, end: n.end_ns, depth, path: np, dur: n.duration_ms, gpu: gpuId });
+                }
+                if (n.children) extractData(n.children, np, depth + 1, gpuId);
+            }
+        }
+
+        // Handle kernel-first format: {gpus: [{id, kernels, nvtx_spans}, ...]}
+        // and legacy tree format: {gpus: [{id, data}, ...]} / [node, ...]
+        function loadFromData(DATA) {
+            if (!DATA) return;
+            if (DATA.gpus) {
+                for (const gpuEntry of DATA.gpus) {
+                    if (!gpuIds.includes(gpuEntry.id)) gpuIds.push(gpuEntry.id);
+                    if (gpuEntry.kernels) {
+                        for (const k of gpuEntry.kernels) {
+                            const kk = { ...k, _gpu: gpuEntry.id, _depth: 0, _path: k.path || k.name || '' };
+                            allNodes.push(kk);
+                            kernels.push(kk);
+                        }
+                        for (const s of (gpuEntry.nvtx_spans || [])) {
+                            nvtxSpans.push({
+                                name: s.name,
+                                start: s.start,
+                                end: s.end,
+                                depth: s.depth || 0,
+                                path: s.path || '',
+                                dur: s.dur || 0,
+                                thread: s.thread || '(unnamed)',
+                                gpu: gpuEntry.id
+                            });
+                        }
+                    } else {
+                        extractData(gpuEntry.data, '', 0, gpuEntry.id);
+                    }
+                }
+            } else if (Array.isArray(DATA)) {
+                if (!gpuIds.includes(0)) gpuIds.push(0);
+                extractData(DATA, '', 0, 0);
+            }
+            isMultiGPU = gpuIds.length > 1;
+        }
+
+        // Streams — rebuilt with each data load
+        let streamMap = {};
+        let streamIds = [];
+        let gpuBands = [];
+        let timeStart = 0, timeEnd = 1, timeSpan = 1;
+        let nvtxMaxDepth = 0;
+
+        function rebuildDataFromCache() {
+            // Clear and rebuild from all cached tiles (progressive) or from baked data
+            allNodes = []; kernels = []; nvtxSpans = [];
+            gpuIds = []; isMultiGPU = false;
+
+            if (PROGRESSIVE) {
+                loadFromData(tileCache.allData());
+            } else {
+                loadFromData(INITIAL_DATA);
+            }
+            kernels.sort((a, b) => a.start_ns - b.start_ns);
+
+            // Rebuild stream map
+            streamMap = {};
+            kernels.forEach(k => {
+                const rawStream = k.stream !== undefined ? String(k.stream) : '?';
+                const key = isMultiGPU ? `${k._gpu}:${rawStream}` : rawStream;
+                k._streamKey = key;
+                if (!streamMap[key]) streamMap[key] = [];
+                streamMap[key].push(k);
+            });
+
+            // Build ordered stream list: group by GPU
+            streamIds = [];
+            gpuBands = [];
+            for (const gpuId of gpuIds) {
+                const startIdx = streamIds.length;
+                const gpuStreams = Object.keys(streamMap)
+                    .filter(k => isMultiGPU ? k.startsWith(gpuId + ':') : true)
+                    .sort((a, b) => {
+                        const aNum = parseInt(a.split(':').pop());
+                        const bNum = parseInt(b.split(':').pop());
+                        if (!isNaN(aNum) && !isNaN(bNum)) return aNum - bNum;
+                        return a.localeCompare(b);
+                    });
+                for (const s of gpuStreams) {
+                    if (!streamIds.includes(s)) streamIds.push(s);
+                }
+                gpuBands.push({ gpuId, startIdx, endIdx: streamIds.length });
+            }
+            Object.values(streamMap).forEach(ks => ks.sort((a, b) => a.start_ns - b.start_ns));
+
+            // Time bounds
+            timeStart = kernels.length ? Math.min(...kernels.map(k => k.start_ns), ...nvtxSpans.map(s => s.start)) : 0;
+            timeEnd = kernels.length ? Math.max(...kernels.map(k => k.end_ns), ...nvtxSpans.map(s => s.end)) : 1;
+            timeSpan = Math.max(timeEnd - timeStart, 1);
+
+            // NVTX depth
+            nvtxMaxDepth = nvtxSpans.length ? Math.min(6, Math.max(...nvtxSpans.map(s => s.depth)) + 1) : 0;
+
+            // Stats
+            const totalKernels = kernels.length;
+            const totalNVTX = nvtxSpans.length;
+            const totalMs = kernels.reduce((a, k) => a + k.duration_ms, 0);
+            const gpuCountLabel = gpuIds.length > 1 ? `GPUs: <strong>${gpuIds.length}</strong> &nbsp; ` : '';
+            document.getElementById('stats').innerHTML =
+                gpuCountLabel +
+                (PROGRESSIVE ? `<span style="color:#238636">● Progressive</span> &nbsp; ` : '') +
+                `<span>Kernels: <strong>${totalKernels}</strong></span> &nbsp; ` +
+                `<span>NVTX: <strong>${totalNVTX}</strong></span> &nbsp; ` +
+                `<span>GPU time: <strong>${totalMs.toFixed(1)}ms</strong></span>`;
+            updateNvtxThreadOptions();
+        }
+
+        // ── Initialization ──
+        async function initData() {
+            if (INITIAL_DATA !== null) {
+                // Baked-in data mode (--trim was specified)
+                rebuildDataFromCache();
+                viewStart = timeStart - timeSpan * 0.02;
+                viewEnd = timeEnd + timeSpan * 0.02;
+                resize();
+                return;
+            }
+            // Progressive mode: fetch metadata, then first window
+            showLoading('Loading profile metadata…');
+            try {
+                const metaResp = await fetch('/api/meta');
+                profileMeta = await metaResp.json();
+                // Check for saved viewport
+                let restored = false;
+                try {
+                    const saved = JSON.parse(localStorage.getItem(_viewKey));
+                    if (saved && saved.s !== undefined && saved.e !== undefined) {
+                        // Set view first so NVTX fetch targets the correct viewport/GPU.
+                        viewStart = saved.s;
+                        viewEnd = saved.e;
+                        await ensureTilesForView(viewStart, viewEnd);
+                        rebuildDataFromCache();
+                        restored = true;
+                    }
+                } catch (e) { }
+                if (!restored) {
+                    // Default view: first 5 seconds
+                    const firstEnd = TILE_WINDOW_S;
+                    viewStart = 0;
+                    viewEnd = firstEnd * 1e9;
+                    await ensureTilesForView(viewStart, viewEnd);
+                    rebuildDataFromCache();
+                }
+                hideLoading();
+                resize();
+                if (showNVTX) maybeFetchNvtxForCurrentView();
+                prefetchAdjacent();
+            } catch (e) {
+                hideLoading();
+                console.error('initData failed:', e);
+                document.getElementById('detail').textContent = 'Failed to load profile: ' + e.message;
+            }
+        }
+
+        // ── State ──
+        let viewStart = 0;
+        let viewEnd = 1;
+        let selectedKernel = null;
+        let selectedStreamIdx = 0;
+        let showNVTX = true;
+        let selectedNvtxThread = 'auto';
+        let searchQuery = '';
+        let searchMatches = new Set();
+        let isDragging = false, dragStartX = 0, dragViewStart = 0, dragViewEnd = 0;
+        let isSelecting = false, selectStartX = 0, selectStartNs = 0, selectEndNs = 0;
+        let bookmarks = [];
+        let hiddenStreams = new Set();  // stream keys to hide
+
+        // ── Layout constants ──
+        const LABEL_W = isMultiGPU ? 110 : 90;
+        const RULER_H = 24;
+        const NVTX_ROW_H = 20;
+        const STREAM_H = 32;
+        const STREAM_GAP = 2;
+        const GPU_SEP_H = isMultiGPU ? 22 : 0;
+        const MIN_BLOCK_W = 2;
+        const DPR = window.devicePixelRatio || 1;
+
+        // ── Colors (vivid so bars stand out on dark background; background unchanged) ──
+        const STREAM_COLORS = ['#3fb950', '#58a6ff', '#bc8cff', '#ff7b7b', '#d4a72c', '#79b8ff', '#56d364'];
+        const NVTX_COLORS = ['#5b8dc9', '#8b7ab8', '#3d9b6e', '#c76b7a', '#b89b4d', '#6b9bc4'];
+        const GPU_SEP_COLORS = ['#58a6ff', '#bc8cff', '#3fb950', '#ff7b7b'];
+
+        function streamColor(idx) { return STREAM_COLORS[idx % STREAM_COLORS.length]; }
+        function nvtxColor(depth) { return NVTX_COLORS[depth % NVTX_COLORS.length]; }
+
+        // ── Formatting ──
+        function fmtDur(ms) { return ms >= 1 ? ms.toFixed(2) + 'ms' : (ms * 1000).toFixed(0) + 'μs'; }
+        function fmtNs(ns) { return (ns / 1e6).toFixed(3) + 'ms'; }
+
+        function activeGpuNvtxSpans() {
+            const activeGpu = currentActiveGpuId();
+            const spans = isMultiGPU ? nvtxSpans.filter(s => s.gpu === activeGpu) : nvtxSpans.slice();
+            return { activeGpu, spans };
+        }
+
+        function dominantNvtxThread(spans) {
+            const counts = new Map();
+            for (const s of spans) {
+                const t = s.thread || '(unnamed)';
+                counts.set(t, (counts.get(t) || 0) + 1);
+            }
+            let best = null;
+            let bestCount = -1;
+            for (const [t, c] of counts.entries()) {
+                if (c > bestCount) {
+                    bestCount = c;
+                    best = t;
+                }
+            }
+            return best;
+        }
+
+        function activeNvtxSpans() {
+            const { activeGpu, spans } = activeGpuNvtxSpans();
+            if (!spans.length) return { activeGpu, thread: null, spans: [] };
+            const thread = selectedNvtxThread === 'auto' ? dominantNvtxThread(spans) : selectedNvtxThread;
+            const filtered = thread ? spans.filter(s => (s.thread || '(unnamed)') === thread) : spans;
+            return { activeGpu, thread, spans: filtered };
+        }
+
+        function activeNvtxMaxDepth() {
+            const { spans } = activeNvtxSpans();
+            return spans.length ? Math.min(6, Math.max(...spans.map(s => s.depth || 0)) + 1) : 0;
+        }
+
+        function updateNvtxThreadOptions() {
+            const sel = document.getElementById('nvtxThreadSel');
+            if (!sel) return;
+            const { spans } = activeGpuNvtxSpans();
+            const counts = new Map();
+            for (const s of spans) {
+                const t = s.thread || '(unnamed)';
+                counts.set(t, (counts.get(t) || 0) + 1);
+            }
+            const options = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+            const current = selectedNvtxThread;
+            sel.innerHTML = '';
+            const autoOpt = document.createElement('option');
+            autoOpt.value = 'auto';
+            autoOpt.textContent = 'NVTX: Auto thread';
+            sel.appendChild(autoOpt);
+            for (const [t, c] of options) {
+                const opt = document.createElement('option');
+                opt.value = t;
+                opt.textContent = `${t} (${c})`;
+                sel.appendChild(opt);
+            }
+            const hasCurrent = current !== 'auto' && options.some(([t]) => t === current);
+            selectedNvtxThread = hasCurrent ? current : 'auto';
+            sel.value = selectedNvtxThread;
+        }
+
+        function onNvtxThreadChange() {
+            const sel = document.getElementById('nvtxThreadSel');
+            selectedNvtxThread = sel ? sel.value : 'auto';
+            draw();
+        }
+
+        // ── Resize ──
+        function contentHeight() {
+            // Total height needed: ruler + NVTX + GPU separators + all stream rows
+            const gpuSeps = isMultiGPU ? gpuBands.length * GPU_SEP_H : 0;
+            return RULER_H + nvtxAreaH() + gpuSeps + streamIds.length * (STREAM_H + STREAM_GAP) + 20;
+        }
+        function resize() {
+            const r = wrap.getBoundingClientRect();
+            const needH = Math.max(r.height, contentHeight());
+            canvas.width = r.width * DPR;
+            canvas.height = needH * DPR;
+            canvas.style.width = r.width + 'px';
+            canvas.style.height = needH + 'px';
+            ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+            draw();
+        }
+        window.addEventListener('resize', resize);
+
+        // ── Coordinate helpers ──
+        function nsToX(ns) {
+            const w = canvas.width / DPR - LABEL_W;
+            return LABEL_W + (ns - viewStart) / (viewEnd - viewStart) * w;
+        }
+        function xToNs(x) {
+            const w = canvas.width / DPR - LABEL_W;
+            return viewStart + (x - LABEL_W) / w * (viewEnd - viewStart);
+        }
+
+        function nvtxAreaH() {
+            const d = activeNvtxMaxDepth();
+            return showNVTX && d > 0 ? d * NVTX_ROW_H + 4 : 0;
+        }
+
+        // Compute Y position for a stream index, accounting for GPU separator rows
+        function streamY(idx) {
+            let y = RULER_H + nvtxAreaH();
+            let sepsAbove = 0;
+            if (isMultiGPU) {
+                for (const band of gpuBands) {
+                    if (idx >= band.startIdx && band.startIdx > 0) sepsAbove++;
+                }
+            }
+            return y + idx * (STREAM_H + STREAM_GAP) + sepsAbove * GPU_SEP_H;
+        }
+
+        // ── Draw ──
+        function draw() {
+            const W = canvas.width / DPR;
+            const H = canvas.height / DPR;
+            ctx.clearRect(0, 0, W, H);
+            ctx.font = '11px SF Mono, Cascadia Code, Fira Code, monospace';
+
+            drawRuler(W);
+            if (showNVTX) drawNVTX(W);
+            drawStreams(W, H);
+        }
+
+        function drawRuler(W) {
+            const tw = W - LABEL_W;
+            const viewSpan = viewEnd - viewStart;
+            // Nice interval
+            const rawInterval = viewSpan / (tw / 80);
+            const mag = Math.pow(10, Math.floor(Math.log10(rawInterval)));
+            const nice = [1, 2, 5, 10].find(n => n * mag >= rawInterval) * mag;
+
+            ctx.fillStyle = '#161b22';
+            ctx.fillRect(0, 0, W, RULER_H);
+            ctx.strokeStyle = '#30363d';
+            ctx.beginPath(); ctx.moveTo(0, RULER_H - 0.5); ctx.lineTo(W, RULER_H - 0.5); ctx.stroke();
+
+            const start = Math.ceil(viewStart / nice) * nice;
+            ctx.fillStyle = '#8b949e';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            for (let t = start; t <= viewEnd; t += nice) {
+                const x = nsToX(t);
+                if (x < LABEL_W || x > W) continue;
+                ctx.strokeStyle = '#30363d';
+                ctx.beginPath(); ctx.moveTo(x, RULER_H - 6); ctx.lineTo(x, RULER_H); ctx.stroke();
+                const absS = t / 1e9;  // absolute seconds
+                const label = absS >= 1 ? absS.toFixed(2) + 's' : absS >= 0.001 ? (absS * 1000).toFixed(2) + 'ms' : (absS * 1e6).toFixed(0) + 'μs';
+                ctx.fillText(label, x, RULER_H - 7);
+            }
+
+            // Label
+            ctx.textAlign = 'right';
+            ctx.fillStyle = '#8b949e';
+            ctx.fillText('Time', LABEL_W - 6, RULER_H - 7);
+        }
+
+        function drawNVTX(W) {
+            const baseY = RULER_H;
+            ctx.fillStyle = 'rgba(22, 27, 34, 0.85)';
+            ctx.fillRect(0, baseY, W, nvtxAreaH());
+
+            const { activeGpu, thread, spans: visibleSpans } = activeNvtxSpans();
+            const depthMax = activeNvtxMaxDepth();
+
+            for (const span of visibleSpans) {
+                if ((span.depth || 0) >= depthMax) continue;
+                const x1 = Math.max(LABEL_W, nsToX(span.start));
+                const x2 = Math.min(W, nsToX(span.end));
+                if (x2 < LABEL_W || x1 > W) continue;
+                const w = Math.max(MIN_BLOCK_W, x2 - x1);
+                const y = baseY + span.depth * NVTX_ROW_H + 1;
+                const h = NVTX_ROW_H - 2;
+
+                ctx.fillStyle = nvtxColor(span.depth);
+                ctx.globalAlpha = 0.82;
+                ctx.fillRect(x1, y, w, h);
+                ctx.globalAlpha = 1;
+                ctx.strokeStyle = nvtxColor(span.depth);
+                ctx.globalAlpha = 0.95;
+                ctx.strokeRect(x1 + 0.5, y + 0.5, w - 1, h - 1);
+                ctx.globalAlpha = 1;
+
+                // Label if wide enough
+                if (w > 40) {
+                    ctx.fillStyle = '#e6edf3';
+                    ctx.textAlign = 'left';
+                    ctx.textBaseline = 'middle';
+                    ctx.save();
+                    ctx.beginPath(); ctx.rect(x1 + 2, y, w - 4, h); ctx.clip();
+                    ctx.font = '10px SF Mono, Cascadia Code, monospace';
+                    ctx.fillText(span.name, x1 + 4, y + h / 2);
+                    ctx.restore();
+                    ctx.font = '11px SF Mono, Cascadia Code, Fira Code, monospace';
+                }
+            }
+
+            // NVTX depth labels
+            for (let d = 0; d < depthMax; d++) {
+                ctx.fillStyle = '#8b949e';
+                ctx.textAlign = 'right';
+                ctx.textBaseline = 'middle';
+                ctx.font = '9px SF Mono, monospace';
+                ctx.fillText('L' + d, LABEL_W - 6, baseY + d * NVTX_ROW_H + NVTX_ROW_H / 2);
+            }
+            // Show which GPU/thread NVTX is displayed
+            if (depthMax > 0) {
+                ctx.fillStyle = GPU_SEP_COLORS[gpuIds.indexOf(activeGpu) % GPU_SEP_COLORS.length];
+                ctx.font = '9px SF Mono, monospace';
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'top';
+                const threadLabel = thread ? ` • ${thread}` : '';
+                ctx.fillText(`NVTX: GPU ${activeGpu}${threadLabel}`, LABEL_W + 4, baseY + 2);
+            }
+            ctx.font = '11px SF Mono, Cascadia Code, Fira Code, monospace';
+
+            // Separator
+            const sepY = baseY + nvtxAreaH() - 1;
+            ctx.strokeStyle = '#30363d';
+            ctx.beginPath(); ctx.moveTo(0, sepY); ctx.lineTo(W, sepY); ctx.stroke();
+        }
+
+        function drawStreams(W, H) {
+            // Draw GPU separator rows first (if multi-GPU)
+            if (isMultiGPU) {
+                for (let gi = 0; gi < gpuBands.length; gi++) {
+                    const band = gpuBands[gi];
+                    if (band.startIdx === 0) continue;  // No separator before first GPU
+                    const sepY = streamY(band.startIdx) - GPU_SEP_H;
+                    const sepColor = GPU_SEP_COLORS[gi % GPU_SEP_COLORS.length];
+
+                    // Background bar
+                    ctx.fillStyle = '#0d1117';
+                    ctx.fillRect(0, sepY, W, GPU_SEP_H);
+
+                    // Colored accent line
+                    ctx.fillStyle = sepColor;
+                    ctx.globalAlpha = 0.6;
+                    ctx.fillRect(0, sepY, W, 2);
+                    ctx.globalAlpha = 1;
+
+                    // GPU label
+                    ctx.fillStyle = sepColor;
+                    ctx.font = '10px SF Mono, Cascadia Code, Fira Code, monospace';
+                    ctx.textAlign = 'left';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(`── GPU ${band.gpuId} ──`, 8, sepY + GPU_SEP_H / 2 + 1);
+                    ctx.font = '11px SF Mono, Cascadia Code, Fira Code, monospace';
+                }
+                // First GPU header at top of streams area
+                if (gpuBands.length > 0) {
+                    const band = gpuBands[0];
+                    const topY = streamY(0) - GPU_SEP_H;
+                    if (topY >= RULER_H + nvtxAreaH() - GPU_SEP_H) {
+                        const sepColor = GPU_SEP_COLORS[0];
+                        ctx.fillStyle = '#0d1117';
+                        ctx.fillRect(0, RULER_H + nvtxAreaH(), W, GPU_SEP_H);
+                        ctx.fillStyle = sepColor;
+                        ctx.globalAlpha = 0.6;
+                        ctx.fillRect(0, RULER_H + nvtxAreaH(), W, 2);
+                        ctx.globalAlpha = 1;
+                        ctx.fillStyle = sepColor;
+                        ctx.font = '10px SF Mono, Cascadia Code, Fira Code, monospace';
+                        ctx.textAlign = 'left';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(`── GPU ${band.gpuId} ──`, 8, RULER_H + nvtxAreaH() + GPU_SEP_H / 2 + 1);
+                        ctx.font = '11px SF Mono, Cascadia Code, Fira Code, monospace';
+                    }
+                }
+            }
+
+            for (let si = 0; si < streamIds.length; si++) {
+                const sid = streamIds[si];
+                if (hiddenStreams.has(sid)) continue;  // skip hidden streams
+                const ks = streamMap[sid];
+                const y = streamY(si) + (isMultiGPU && gpuBands[0].startIdx === 0 ? GPU_SEP_H : 0);
+                const isSelected = si === selectedStreamIdx;
+                const color = streamColor(si);
+
+                // Background
+                if (isSelected) {
+                    ctx.fillStyle = 'rgba(55, 65, 85, 0.5)';
+                    ctx.fillRect(0, y, W, STREAM_H);
+                }
+
+                // Stream label
+                ctx.fillStyle = isSelected ? '#79b8ff' : '#8b949e';
+                ctx.textAlign = 'right';
+                ctx.textBaseline = 'middle';
+                const isNccl = ks.some(k => k.name.toLowerCase().includes('nccl'));
+                let streamLabel;
+                if (isMultiGPU) {
+                    // "G0:S21" format
+                    const parts = sid.split(':');
+                    streamLabel = (isNccl ? '⚡ ' : '') + 'G' + parts[0] + ':S' + parts[1];
+                } else {
+                    streamLabel = (isNccl ? '⚡ ' : '') + 'S' + sid;
+                }
+                ctx.fillText(streamLabel, LABEL_W - 6, y + STREAM_H / 2);
+
+                // Kernel blocks
+                for (const k of ks) {
+                    let x1 = nsToX(k.start_ns);
+                    let x2 = nsToX(k.end_ns);
+                    if (x2 < LABEL_W || x1 > W) continue;
+                    x1 = Math.max(LABEL_W, x1);
+                    x2 = Math.min(W, x2);
+                    const w = Math.max(MIN_BLOCK_W, x2 - x1);
+                    const bY = y + 2;
+                    const bH = STREAM_H - 4;
+
+                    const isMatch = searchQuery && searchMatches.has(k);
+                    const isSel = k === selectedKernel;
+                    const isNcclK = k.name.toLowerCase().includes('nccl');
+
+                    // Color (higher base alpha so blocks are clearly visible on dark bg)
+                    let fillColor = isNcclK ? '#d2a8ff' : color;
+                    let alpha = 0.78 + 0.22 * (k.heat || 0);
+                    if (searchQuery && !isMatch) alpha = 0.2;
+                    if (isSel) { fillColor = '#79b8ff'; alpha = 1; }
+
+                    ctx.globalAlpha = alpha;
+                    ctx.fillStyle = fillColor;
+                    ctx.fillRect(x1, bY, w, bH);
+                    ctx.globalAlpha = 1;
+                    // Subtle border so blocks don't blend into background
+                    if (!isSel) {
+                        ctx.strokeStyle = fillColor;
+                        ctx.globalAlpha = 0.5;
+                        ctx.strokeRect(x1 + 0.5, bY + 0.5, w - 1, bH - 1);
+                        ctx.globalAlpha = 1;
+                    }
+
+                    if (isSel) {
+                        ctx.strokeStyle = '#79b8ff';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(x1, bY, w, bH);
+                        ctx.lineWidth = 1;
+                    }
+
+                    // Kernel name label
+                    if (w > 20) {
+                        ctx.fillStyle = isSel ? '#fff' : (searchQuery && !isMatch ? '#555' : '#1c1c1c');
+                        ctx.textAlign = 'left';
+                        ctx.textBaseline = 'middle';
+                        ctx.save();
+                        ctx.beginPath(); ctx.rect(x1 + 1, bY, w - 2, bH); ctx.clip();
+                        const short = k.name.length > 40 ? k.name.slice(0, 38) + '…' : k.name;
+                        // Name first, duration only if space
+                        const label = w > 100 ? short + ' ' + fmtDur(k.duration_ms) : short;
+                        if (label) ctx.fillText(label, x1 + 3, bY + bH / 2);
+                        ctx.restore();
+                    }
+                }
+
+                // Gridline
+                if (si < streamIds.length - 1) {
+                    ctx.strokeStyle = '#1c2230';
+                    ctx.beginPath(); ctx.moveTo(LABEL_W, y + STREAM_H + 1); ctx.lineTo(W, y + STREAM_H + 1); ctx.stroke();
+                }
+            }
+        }
+
+        // ── Hit testing ──
+        function hitTest(mx, my) {
+            for (let si = 0; si < streamIds.length; si++) {
+                const y = streamY(si) + (isMultiGPU && gpuBands[0].startIdx === 0 ? GPU_SEP_H : 0);
+                if (my < y || my > y + STREAM_H) continue;
+                const ks = streamMap[streamIds[si]];
+                for (const k of ks) {
+                    const x1 = Math.max(LABEL_W, nsToX(k.start_ns));
+                    const x2 = Math.min(canvas.width / DPR, nsToX(k.end_ns));
+                    if (mx >= x1 && mx <= Math.max(x1 + MIN_BLOCK_W, x2)) {
+                        return { kernel: k, streamIdx: si };
+                    }
+                }
+                return { kernel: null, streamIdx: si };
+            }
+            return null;
+        }
+
+        // ── Detail panel ──
+        function showDetail(k) {
+            if (!k) {
+                document.getElementById('detail').className = 'empty';
+                document.getElementById('detail').innerHTML = 'Click a kernel to see details. Press A for AI chat. Keyboard: ←/→ pan, +/- zoom, ↑/↓ stream, / search, ? help';
+                return;
+            }
+            const parts = (k._path || '').split(' > ');
+            const pathHtml = parts.slice(0, -1).map(p => `<span>${escH(p)}</span>`).join('<span class="sep">›</span>');
+            const gpuLabel = isMultiGPU ? ` &nbsp;|&nbsp; GPU ${k._gpu}` : '';
+
+            document.getElementById('detail').className = '';
+            document.getElementById('detail').innerHTML =
+                `<div class="detail-name">⚡ ${escH(k.name)}</div>` +
+                `<div class="detail-dur">${fmtDur(k.duration_ms)} &nbsp;|&nbsp; Stream ${k.stream ?? '?'}${gpuLabel} &nbsp;|&nbsp; ${fmtNs(k.start_ns)} → ${fmtNs(k.end_ns)}</div>` +
+                (pathHtml ? `<div class="detail-path">📦 ${pathHtml}</div>` : '');
+        }
+
+        function escH(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+        // ── Navigation ──
+        // ── Progressive tile loading on viewport change ──
+        let _viewChangeTimer = null;
+        const _viewLabel = (typeof BOOT.GPU_LABEL === 'string' && BOOT.GPU_LABEL) ? BOOT.GPU_LABEL : 'timeline';
+        const _viewKey = 'timeline-view-' + _viewLabel.replace(/[^a-zA-Z0-9]/g, '_');
+        function afterViewChange() {
+            // Persist viewport to localStorage
+            try { localStorage.setItem(_viewKey, JSON.stringify({ s: viewStart, e: viewEnd, t: Date.now() })); } catch (e) { }
+            if (!PROGRESSIVE) return;
+            clearTimeout(_viewChangeTimer);
+            _viewChangeTimer = setTimeout(async () => {
+                await ensureTilesForView(viewStart, viewEnd);
+                resize();
+                prefetchAdjacent();
+            }, 150);
+        }
+
+        function clampView() {
+            const minNs = 0;  // time is never negative
+            const maxNs = profileMeta ? profileMeta.time_range_ns[1] : timeEnd;
+            const span = viewEnd - viewStart;
+            if (viewStart < minNs) { viewStart = minNs; viewEnd = minNs + span; }
+            if (viewEnd > maxNs) { viewEnd = maxNs; viewStart = maxNs - span; }
+            // Final clamp in case span > total range
+            if (viewStart < minNs) viewStart = minNs;
+        }
+
+        function panBy(fraction) {
+            const span = viewEnd - viewStart;
+            const delta = span * fraction;
+            viewStart += delta; viewEnd += delta;
+            clampView();
+            draw();
+            afterViewChange();
+        }
+        function zoomAt(factor, centerNs) {
+            if (centerNs === undefined) centerNs = (viewStart + viewEnd) / 2;
+            const span = viewEnd - viewStart;
+            const newSpan = span * factor;
+            const minSpan = 100; // 100 ns minimum
+            if (newSpan < minSpan) return;
+            const ratio = (centerNs - viewStart) / span;
+            viewStart = centerNs - newSpan * ratio;
+            viewEnd = centerNs + newSpan * (1 - ratio);
+            clampView();
+            draw();
+            afterViewChange();
+        }
+        function zoomIn() { zoomAt(0.5); }
+        function zoomOut() { zoomAt(2); }
+        function fitAll() {
+            const maxNs = profileMeta ? profileMeta.time_range_ns[1] : timeEnd;
+            viewStart = 0;
+            viewEnd = maxNs;
+            clampView();
+            draw();
+            afterViewChange();
+        }
+
+        function selectKernel(k) {
+            selectedKernel = k;
+            showDetail(k);
+            draw();
+        }
+
+        function nextKernel(dir) {
+            const sid = streamIds[selectedStreamIdx];
+            const ks = streamMap[sid];
+            if (!ks || !ks.length) return;
+            // Find current kernel in this stream using _streamKey
+            if (!selectedKernel || selectedKernel._streamKey !== sid) {
+                selectKernel(ks[0]); ensureVisible(ks[0]); return;
+            }
+            const idx = ks.indexOf(selectedKernel);
+            if (idx === -1) { selectKernel(ks[0]); ensureVisible(ks[0]); return; }
+            const next = idx + dir;
+            if (next >= 0 && next < ks.length) {
+                selectKernel(ks[next]); ensureVisible(ks[next]);
+            }
+        }
+
+        function ensureVisible(k) {
+            const span = viewEnd - viewStart;
+            if (k.start_ns < viewStart || k.end_ns > viewEnd) {
+                const center = (k.start_ns + k.end_ns) / 2;
+                viewStart = center - span / 2;
+                viewEnd = center + span / 2;
+                clampView();
+                draw();
+                afterViewChange();
+            }
+        }
+
+        // ── GPU Info dropdown ──
+        function toggleGpuInfo() {
+            const panel = document.getElementById('gpuInfoPanel');
+            if (panel.style.display === 'none') {
+                let html = '<table style="border-collapse:collapse;width:100%">';
+                html += '<tr style="color:#58a6ff"><th style="text-align:left;padding:2px 6px">GPU</th><th style="text-align:left;padding:2px 6px">Name</th><th style="text-align:right;padding:2px 6px">SMs</th><th style="text-align:right;padding:2px 6px">Mem</th><th style="text-align:left;padding:2px 6px">PCI</th></tr>';
+                GPU_INFO.forEach(g => {
+                    html += `<tr><td style="padding:2px 6px;color:#7ee787">${g.id}</td><td style="padding:2px 6px">${g.name}</td><td style="padding:2px 6px;text-align:right">${g.sms}</td><td style="padding:2px 6px;text-align:right">${g.mem_gb}GB</td><td style="padding:2px 6px;color:#8b949e">${g.pci}</td></tr>`;
+                });
+                html += '</table>';
+                document.getElementById('gpuInfoContent').innerHTML = html;
+                panel.style.display = 'block';
+            } else {
+                panel.style.display = 'none';
+            }
+        }
+
+        // ── Bookmarks ──
+        function saveBookmark() {
+            const k = selectedKernel;
+            const time_ns = k ? (k.start_ns + k.end_ns) / 2 : (viewStart + viewEnd) / 2;
+            const bm = {
+                label: k ? k.name.slice(0, 30) : `@${(time_ns / 1e9).toFixed(2)}s`,
+                time_ns,
+                nvtx_path: k ? (k._path || '') : '',
+                nvtx_index: k ? nvtxSpans.findIndex(s => time_ns >= s.start && time_ns <= s.end) : -1,
+                kernel_index: k ? kernels.indexOf(k) : -1,
+                kernel_name: k ? k.name : '',
+                stream: k ? (k._streamKey || '') : '',
+                gpu: k ? (k._gpu ?? '') : '',
+            };
+            bookmarks.push(bm);
+            showToast(`Bookmark #${bookmarks.length}: ${bm.label}`);
+            draw();
+        }
+
+        function jumpToBookmark(idx) {
+            if (idx < 0 || idx >= bookmarks.length) return;
+            const bm = bookmarks[idx];
+            const span = viewEnd - viewStart;
+            viewStart = bm.time_ns - span / 2;
+            viewEnd = bm.time_ns + span / 2;
+            clampView();
+            draw();
+            afterViewChange();
+            // Try to select the kernel if we have an index
+            if (bm.kernel_index >= 0 && bm.kernel_index < kernels.length) {
+                selectKernel(kernels[bm.kernel_index]);
+            }
+            showToast(`→ Bookmark #${idx + 1}: ${bm.label}`);
+        }
+
+        function toggleBookmarkList() {
+            const panel = document.getElementById('gpuInfoPanel');
+            if (bookmarks.length === 0) { showToast('No bookmarks. Press B to save one.'); return; }
+            let html = '<div style="color:#58a6ff;margin-bottom:4px;font-weight:600">📌 Bookmarks</div>';
+            html += '<table style="border-collapse:collapse;width:100%">';
+            bookmarks.forEach((bm, i) => {
+                const ts = (bm.time_ns / 1e9).toFixed(3) + 's';
+                html += `<tr style="cursor:pointer" onclick="jumpToBookmark(${i});document.getElementById('gpuInfoPanel').style.display='none'"><td style="padding:2px 4px;color:#7ee787">${i + 1}</td><td style="padding:2px 4px">${bm.label}</td><td style="padding:2px 4px;color:#8b949e">${ts}</td><td style="padding:2px 4px;color:#8b949e">${bm.nvtx_path ? bm.nvtx_path.split(' > ').pop() : ''}</td></tr>`;
+            });
+            html += '</table>';
+            document.getElementById('gpuInfoContent').innerHTML = html;
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function showToast(msg) {
+            let toast = document.getElementById('toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'toast';
+                toast.style.cssText = 'position:fixed;bottom:60px;left:50%;transform:translateX(-50%);background:#21262d;color:#e6edf3;padding:6px 16px;border-radius:6px;border:1px solid #30363d;font-size:12px;z-index:200;opacity:0;transition:opacity 0.3s';
+                document.body.appendChild(toast);
+            }
+            toast.textContent = msg;
+            toast.style.opacity = '1';
+            setTimeout(() => { toast.style.opacity = '0'; }, 2000);
+        }
+
+        function toggleNVTX() {
+            showNVTX = !showNVTX;
+            document.getElementById('nvtxBtn').classList.toggle('active', showNVTX);
+            updateNvtxThreadOptions();
+            updateNvtxLoadingIndicator();
+            draw();
+            if (showNVTX) {
+                void ensureTilesForView(viewStart, viewEnd);
+            }
+        }
+
+        function toggleStreamFilter() {
+            const panel = document.getElementById('gpuInfoPanel');
+            let html = '<div style="color:#58a6ff;margin-bottom:6px;font-weight:600">📺 Stream Visibility</div>';
+            // Group streams by GPU
+            const gpuStreams = {};
+            streamIds.forEach(sid => {
+                const parts = sid.split(':');
+                const gpuId = isMultiGPU ? parts[0] : 'all';
+                if (!gpuStreams[gpuId]) gpuStreams[gpuId] = [];
+                gpuStreams[gpuId].push(sid);
+            });
+            for (const [gpuId, streams] of Object.entries(gpuStreams)) {
+                const label = gpuId === 'all' ? 'Streams' : `GPU ${gpuId}`;
+                html += `<div style="margin-top:4px;color:#7ee787;font-size:10px">${label} ` +
+                    `<a href="#" onclick="setGpuStreams('${gpuId}',true);return false" style="color:#58a6ff;text-decoration:none;margin-left:4px">All</a> ` +
+                    `<a href="#" onclick="setGpuStreams('${gpuId}',false);return false" style="color:#58a6ff;text-decoration:none">None</a></div>`;
+                for (const sid of streams) {
+                    const checked = !hiddenStreams.has(sid) ? 'checked' : '';
+                    const streamLabel = isMultiGPU ? sid.split(':')[1] : sid;
+                    const count = (streamMap[sid] || []).length;
+                    html += `<label style="display:block;padding:1px 0;cursor:pointer"><input type="checkbox" ${checked} onchange="toggleStream('${sid}')" style="margin-right:4px">${streamLabel} <span style="color:#484f58">(${count})</span></label>`;
+                }
+            }
+            document.getElementById('gpuInfoContent').innerHTML = html;
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function toggleStream(sid) {
+            if (hiddenStreams.has(sid)) hiddenStreams.delete(sid);
+            else hiddenStreams.add(sid);
+            resize();
+        }
+
+        function setGpuStreams(gpuId, visible) {
+            streamIds.forEach(sid => {
+                const gid = isMultiGPU ? sid.split(':')[0] : 'all';
+                if (gid === gpuId) {
+                    if (visible) hiddenStreams.delete(sid);
+                    else hiddenStreams.add(sid);
+                }
+            });
+            toggleStreamFilter(); // refresh checkboxes
+            resize();
+        }
+
+        function toggleHelp() {
+            const h = document.getElementById('helpOverlay');
+            h.style.display = h.style.display === 'none' ? 'block' : 'none';
+        }
+
+        // ── Search ──
+        function onSearch() {
+            searchQuery = document.getElementById('searchInput').value.trim().toLowerCase();
+            searchMatches = new Set();
+            if (searchQuery) {
+                kernels.forEach(k => { if (k.name.toLowerCase().includes(searchQuery)) searchMatches.add(k); });
+                document.getElementById('searchHint').textContent = searchMatches.size + ' matches';
+            } else {
+                document.getElementById('searchHint').textContent = '';
+            }
+            draw();
+        }
+
+        // ── Mouse events ──
+        canvas.addEventListener('mousedown', e => {
+            if (e.button !== 0) return;
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+            if (mx < LABEL_W) return;
+
+            const hit = hitTest(mx, my);
+            if (hit) {
+                selectedStreamIdx = hit.streamIdx;
+                updateNvtxThreadOptions();
+                maybeFetchNvtxForCurrentView();
+                if (hit.kernel) { selectKernel(hit.kernel); return; }
+            }
+
+            // Shift+drag = pan (old behavior), plain drag = select time range
+            if (e.shiftKey) {
+                isDragging = true;
+                dragStartX = e.clientX;
+                dragViewStart = viewStart;
+                dragViewEnd = viewEnd;
+                canvas.style.cursor = 'grabbing';
+            } else {
+                isSelecting = true;
+                selectStartX = mx;
+                selectStartNs = xToNs(mx);
+                selectEndNs = selectStartNs;
+                canvas.style.cursor = 'col-resize';
+            }
+        });
+
+        canvas.addEventListener('mousemove', e => {
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+
+            if (isDragging) {
+                const dx = e.clientX - dragStartX;
+                const w = canvas.width / DPR - LABEL_W;
+                const nsPerPx = (dragViewEnd - dragViewStart) / w;
+                viewStart = dragViewStart - dx * nsPerPx;
+                viewEnd = dragViewEnd - dx * nsPerPx;
+                clampView();
+                afterViewChange();
+                draw();
+                return;
+            }
+
+            if (isSelecting) {
+                selectEndNs = xToNs(Math.max(LABEL_W, Math.min(mx, canvas.width / DPR)));
+                draw();
+                // Draw selection overlay
+                const x1 = Math.max(LABEL_W, nsToX(Math.min(selectStartNs, selectEndNs)));
+                const x2 = Math.min(canvas.width / DPR, nsToX(Math.max(selectStartNs, selectEndNs)));
+                ctx.fillStyle = 'rgba(88, 166, 255, 0.15)';
+                ctx.fillRect(x1, 0, x2 - x1, canvas.height / DPR);
+                ctx.strokeStyle = '#58a6ff';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath(); ctx.moveTo(x1, 0); ctx.lineTo(x1, canvas.height / DPR); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(x2, 0); ctx.lineTo(x2, canvas.height / DPR); ctx.stroke();
+                ctx.setLineDash([]);
+                return;
+            }
+
+            // Tooltip
+            const hit = hitTest(mx, my);
+            const tt = document.getElementById('tooltip');
+            if (hit && hit.kernel) {
+                const k = hit.kernel;
+                const isNccl = k.name.toLowerCase().includes('nccl');
+                tt.innerHTML = `<div style="color:${isNccl ? '#d2a8ff' : '#7ee787'};font-weight:600">${escH(k.name)}</div>` +
+                    `<div style="color:#8b949e">${fmtDur(k.duration_ms)} &nbsp;|&nbsp; Stream ${k.stream ?? '?'}</div>`;
+                tt.style.display = 'block';
+                tt.style.left = (e.clientX + 12) + 'px';
+                tt.style.top = (e.clientY - 10) + 'px';
+                // Keep on screen
+                const tr = tt.getBoundingClientRect();
+                if (tr.right > window.innerWidth) tt.style.left = (e.clientX - tr.width - 8) + 'px';
+                if (tr.bottom > window.innerHeight) tt.style.top = (e.clientY - tr.height - 8) + 'px';
+            } else {
+                tt.style.display = 'none';
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            if (isSelecting) {
+                isSelecting = false;
+                canvas.style.cursor = 'crosshair';
+                // Zoom to selection if it's wide enough
+                const sNs = Math.min(selectStartNs, selectEndNs);
+                const eNs = Math.max(selectStartNs, selectEndNs);
+                if (eNs - sNs > 1000) {
+                    viewStart = sNs; viewEnd = eNs;
+                    clampView();
+                    draw();
+                    afterViewChange();
+                } else {
+                    draw();  // redraw to clear selection overlay
+                }
+                return;
+            }
+            isDragging = false; canvas.style.cursor = 'crosshair';
+        });
+        canvas.addEventListener('mouseleave', () => {
+            isDragging = false; isSelecting = false; canvas.style.cursor = 'crosshair';
+            document.getElementById('tooltip').style.display = 'none';
+        });
+
+        canvas.addEventListener('wheel', e => {
+            e.preventDefault();
+            if (e.shiftKey || e.ctrlKey) {
+                // Shift+scroll or pinch (ctrlKey on Mac) = zoom
+                const rect = canvas.getBoundingClientRect();
+                const mx = e.clientX - rect.left;
+                const ns = xToNs(mx);
+                const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+                zoomAt(factor, ns);
+            } else {
+                // Plain scroll = pan (trackpad swipe)
+                const span = viewEnd - viewStart;
+                const dx = e.deltaX * span * 0.001;
+                viewStart += dx; viewEnd += dx;
+                // Vertical scroll moves canvas scroll position
+                wrap.scrollTop += e.deltaY;
+                clampView();
+                draw();
+                afterViewChange();
+            }
+        }, { passive: false });
+
+        // ── Keyboard ──
+        document.addEventListener('keydown', e => {
+            const tag = e.target.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA') {
+                if (e.key === 'Escape') {
+                    e.target.blur(); searchQuery = ''; searchMatches.clear();
+                    document.getElementById('searchInput').value = ''; document.getElementById('searchHint').textContent = ''; draw();
+                }
+                return;
+            }
+
+            const helpEl = document.getElementById('helpOverlay');
+            if (helpEl.style.display === 'block' && e.key !== '?') { helpEl.style.display = 'none'; return; }
+
+            switch (e.key) {
+                case 'ArrowLeft': case 'h': e.preventDefault(); panBy(-0.15); break;
+                case 'ArrowRight': case 'l': e.preventDefault(); panBy(0.15); break;
+                case 'ArrowUp': case 'k':
+                    e.preventDefault();
+                    selectedStreamIdx = Math.max(0, selectedStreamIdx - 1);
+                    updateNvtxThreadOptions();
+                    maybeFetchNvtxForCurrentView();
+                    draw();
+                    break;
+                case 'ArrowDown': case 'j':
+                    e.preventDefault();
+                    selectedStreamIdx = Math.min(streamIds.length - 1, selectedStreamIdx + 1);
+                    updateNvtxThreadOptions();
+                    maybeFetchNvtxForCurrentView();
+                    draw();
+                    break;
+                case '+': case '=': zoomIn(); break;
+                case '-': case '_': zoomOut(); break;
+                case 'Home': case '0': fitAll(); break;
+                case 'Tab': e.preventDefault(); nextKernel(e.shiftKey ? -1 : 1); break;
+                case '/': e.preventDefault(); document.getElementById('searchInput').focus(); break;
+                case 'Escape':
+                    selectedKernel = null; showDetail(null);
+                    searchQuery = ''; searchMatches.clear();
+                    document.getElementById('searchInput').value = '';
+                    document.getElementById('searchHint').textContent = '';
+                    document.getElementById('gpuInfoPanel').style.display = 'none';
+                    draw(); break;
+                case 'n': case 'N': toggleNVTX(); break;
+                case 'a': case 'A': toggleChat(); break;
+                case 'f': case 'F': fitAll(); break;
+                case 'b': saveBookmark(); break;
+                case 'B': toggleBookmarkList(); break;
+                case 's': case 'S': toggleStreamFilter(); break;
+                case '?': toggleHelp(); break;
+                default:
+                    // 1-9 jump to bookmark
+                    if (e.key >= '1' && e.key <= '9') {
+                        const bi = parseInt(e.key) - 1;
+                        if (bi < bookmarks.length) { jumpToBookmark(bi); }
+                    }
+                    break;
+            }
+        });
+
+        // ── AI Chat ──
+        let chatHistory = [];  // [{role, content}]
+        let chatStreaming = false;
+
+        function toggleChat() {
+            const sidebar = document.getElementById('chatSidebar');
+            const btn = document.getElementById('chatBtn');
+            sidebar.classList.toggle('open');
+            btn.classList.toggle('active', sidebar.classList.contains('open'));
+            if (sidebar.classList.contains('open')) {
+                document.getElementById('chatInput').focus();
+            }
+            setTimeout(resize, 0);
+        }
+
+        function buildUIContext() {
+            return {
+                selected_kernel: selectedKernel ? {
+                    name: selectedKernel.name,
+                    duration_ms: selectedKernel.duration_ms,
+                    stream: selectedKernel.stream,
+                } : null,
+                view_state: {
+                    time_range_ns: [viewStart, viewEnd],
+                    visible_span_ms: (viewEnd - viewStart) / 1e6,
+                    mode: 'WEB',
+                },
+                stats: { kernel_count: kernels.length, stream_count: streamIds.length },
+            };
+        }
+
+        function appendChatMsg(role, content, cls) {
+            const msgs = document.getElementById('chatMessages');
+            const div = document.createElement('div');
+            div.className = 'chat-msg ' + (cls || role);
+            div.innerHTML = formatChatContent(content);
+            msgs.appendChild(div);
+            msgs.scrollTop = msgs.scrollHeight;
+            return div;
+        }
+
+        function formatChatContent(text) {
+            // Simple markdown-ish rendering
+            return text
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/```([\s\S]*?)```/g, '<pre>$1</pre>')
+                .replace(/`([^`]+)`/g, '<code>$1</code>')
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\n/g, '<br>');
+        }
+
+        async function sendChat() {
+            const input = document.getElementById('chatInput');
+            const msg = input.value.trim();
+            if (!msg || chatStreaming) return;
+            input.value = '';
+
+            appendChatMsg('user', msg);
+            chatHistory.push({ role: 'user', content: msg });
+
+            chatStreaming = true;
+            const sendBtn = document.getElementById('chatSendBtn');
+            sendBtn.disabled = true;
+            sendBtn.textContent = '...';
+
+            const aiDiv = appendChatMsg('ai', '');
+            aiDiv.classList.add('chat-streaming');
+            let fullContent = '';
+
+            try {
+                const modelSel = document.getElementById('chatModel');
+                const model = modelSel.value || undefined;
+                const body = {
+                    messages: chatHistory,
+                    model: model,
+                    stream: true,
+                    ui_context: buildUIContext(),
+                };
+
+                const resp = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+
+                if (!resp.ok) {
+                    const err = await resp.text();
+                    aiDiv.innerHTML = formatChatContent('Error: ' + err);
+                    aiDiv.classList.remove('chat-streaming');
+                    chatStreaming = false;
+                    sendBtn.disabled = false;
+                    sendBtn.textContent = 'Send';
+                    return;
+                }
+
+                const reader = resp.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+
+                    // Parse SSE events (format: "event: type\ndata: {...}\n\n")
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+                    let currentEvent = 'message';
+
+                    for (const line of lines) {
+                        if (line.startsWith('event: ')) {
+                            currentEvent = line.slice(7).trim();
+                            continue;
+                        }
+                        if (!line.startsWith('data: ')) continue;
+                        const data = line.slice(6);
+                        if (data === '[DONE]') continue;
+                        try {
+                            const payload = JSON.parse(data);
+                            if (currentEvent === 'text') {
+                                const chunk = payload.chunk || payload.content || '';
+                                fullContent += chunk;
+                                aiDiv.innerHTML = formatChatContent(fullContent);
+                                document.getElementById('chatMessages').scrollTop =
+                                    document.getElementById('chatMessages').scrollHeight;
+                            } else if (currentEvent === 'system') {
+                                appendChatMsg('system', payload.content || '', 'system');
+                            } else if (currentEvent === 'done') {
+                                // done event — may contain usage info
+                                if (payload.content) {
+                                    fullContent = payload.content;
+                                    aiDiv.innerHTML = formatChatContent(fullContent);
+                                }
+                            } else if (currentEvent === 'action') {
+                                executeAIAction(payload);
+                            }
+                        } catch (e) { /* ignore parse errors in SSE */ }
+                        currentEvent = 'message';  // reset after consuming data
+                    }
+                }
+
+                chatHistory.push({ role: 'assistant', content: fullContent });
+
+                // Check for inline actions in the response
+                parseAndExecuteActions(fullContent);
+
+            } catch (err) {
+                aiDiv.innerHTML = formatChatContent('Connection error: ' + err.message);
+            } finally {
+                aiDiv.classList.remove('chat-streaming');
+                chatStreaming = false;
+                sendBtn.disabled = false;
+                sendBtn.textContent = 'Send';
+                input.focus();
+            }
+        }
+
+        function executeAIAction(action) {
+            if (action.type === 'navigate_to_kernel' || (action.action_type === 'navigate_to_kernel')) {
+                const target = action.target_name || action.target;
+                if (target) {
+                    const k = kernels.find(k => k.name.includes(target));
+                    if (k) {
+                        const si = streamIds.indexOf(String(k.stream));
+                        if (si >= 0) selectedStreamIdx = si;
+                        updateNvtxThreadOptions();
+                        maybeFetchNvtxForCurrentView();
+                        selectKernel(k);
+                        ensureVisible(k);
+                        appendChatMsg('system', '→ Navigated to: ' + k.name.slice(0, 60), 'system');
+                    }
+                }
+            } else if (action.type === 'zoom_to_time_range' || (action.action_type === 'zoom_to_time_range')) {
+                const startS = action.start_s;
+                const endS = action.end_s;
+                if (startS !== undefined && endS !== undefined) {
+                    viewStart = startS * 1e9;
+                    viewEnd = endS * 1e9;
+                    draw();
+                    appendChatMsg('system', '→ Zoomed to ' + startS.toFixed(3) + 's – ' + endS.toFixed(3) + 's', 'system');
+                }
+            }
+        }
+
+        function parseAndExecuteActions(content) {
+            // Look for JSON action blocks in the response
+            const actionRe = /```json\s*({[^}]*"type"\s*:\s*"(navigate_to_kernel|zoom_to_time_range)"[^}]*})\s*```/g;
+            let match;
+            while ((match = actionRe.exec(content)) !== null) {
+                try {
+                    executeAIAction(JSON.parse(match[1]));
+                } catch (e) { /* ignore */ }
+            }
+        }
+
+        // Chat input: Enter to send
+        document.getElementById('chatInput').addEventListener('keydown', e => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendChat();
+            }
+            if (e.key === 'Escape') {
+                e.target.blur();
+            }
+            e.stopPropagation();  // Don't trigger timeline shortcuts
+        });
+
+        // Load available models
+        async function loadModels() {
+            try {
+                const resp = await fetch('/api/models');
+                const data = await resp.json();
+                const sel = document.getElementById('chatModel');
+                if (data.options && data.options.length) {
+                    data.options.forEach(m => {
+                        const opt = document.createElement('option');
+                        opt.value = m.id;
+                        opt.textContent = m.label;
+                        if (m.id === data.default) opt.selected = true;
+                        sel.appendChild(opt);
+                    });
+                } else {
+                    const opt = document.createElement('option');
+                    opt.textContent = 'No models configured';
+                    opt.disabled = true;
+                    sel.appendChild(opt);
+                }
+            } catch (e) {
+                console.warn('Failed to load models:', e);
+            }
+        }
+        loadModels();
+
+        // ── Init ──
+        // ── Init ──
+        setTimeout(initData, 0);

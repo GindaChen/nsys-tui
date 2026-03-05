@@ -25,6 +25,7 @@ from urllib.parse import quote
 # See docs/chat-thread-pool.md.
 CHAT_SERVER_POOL_SIZE = 8
 CHAT_SERVER_QUEUE_SIZE = 16
+_TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
 
 class _ThreadPoolMixIn(socketserver.ThreadingMixIn):
@@ -141,9 +142,16 @@ class _ViewerHandler(BaseHTTPRequestHandler):
     _prebuilt_data: list = []  # pre-built timeline payload per GPU
     _prebuilt_nvtx_mode: str = "full"  # "full" (prebuilt has NVTX) or "tile" (compute per tile)
     _tile_nvtx_cache: dict = {}  # (start_ns, end_ns, devices_tuple) -> {gpu_id: [nvtx_spans]}
+    _asset_cache: dict[str, bytes] = {}
 
     def do_GET(self):
         path = self.path.split("?")[0]
+        if path == "/assets/timeline.css":
+            self._serve_asset("timeline.css", "text/css; charset=utf-8")
+            return
+        if path == "/assets/timeline.js":
+            self._serve_asset("timeline.js", "application/javascript; charset=utf-8")
+            return
         if path == "/api/models":
             try:
                 import nsys_ai.chat as chat_mod
@@ -165,6 +173,24 @@ class _ViewerHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(self.html_bytes)))
         self.end_headers()
         self.wfile.write(self.html_bytes)
+
+    def _serve_asset(self, filename: str, content_type: str):
+        """Serve static timeline assets from package templates directory."""
+        body = self.__class__._asset_cache.get(filename)
+        if body is None:
+            try:
+                path = os.path.join(_TEMPLATE_DIR, filename)
+                with open(path, "rb") as f:
+                    body = f.read()
+                self.__class__._asset_cache[filename] = body
+            except OSError:
+                self.send_error(404)
+                return
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _handle_meta(self):
         """Return profile metadata: time range, GPU list, device count."""
