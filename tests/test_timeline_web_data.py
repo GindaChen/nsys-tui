@@ -2,7 +2,12 @@ import json
 import sqlite3
 
 from nsys_ai.profile import Profile
-from nsys_ai.viewer import build_timeline_gpu_data, generate_timeline_data_json
+from nsys_ai.viewer import (
+    build_timeline_gpu_data,
+    generate_timeline_data_json,
+    generate_timeline_html,
+    write_timeline_html,
+)
 
 
 def test_timeline_web_kernel_first_keeps_kernels_outside_nvtx(minimal_nsys_db_path):
@@ -72,3 +77,27 @@ def test_timeline_web_can_build_nvtx_without_kernels(minimal_nsys_db_path):
         assert entry["kernels"] == []
         assert len(entry["nvtx_spans"]) >= 1
         assert "thread" in entry["nvtx_spans"][0]
+
+
+def test_timeline_web_template_uses_external_assets(minimal_nsys_db_path):
+    with Profile(minimal_nsys_db_path) as prof:
+        html = generate_timeline_html(prof, [0], None)
+    assert 'href="/assets/timeline.css"' in html
+    assert 'src="/assets/timeline.js"' in html
+    assert "window.__TIMELINE_BOOTSTRAP__" in html
+
+
+def test_timeline_html_export_writes_sidecar_assets(minimal_nsys_db_path, tmp_path):
+    out_html = tmp_path / "timeline.html"
+    with Profile(minimal_nsys_db_path) as prof:
+        write_timeline_html(prof, 0, (0, 5_000_000), str(out_html))
+
+    out_css = tmp_path / "timeline.css"
+    out_js = tmp_path / "timeline.js"
+    assert out_html.exists()
+    assert out_css.exists()
+    assert out_js.exists()
+
+    html_text = out_html.read_text(encoding="utf-8")
+    assert 'href="timeline.css"' in html_text
+    assert 'src="timeline.js"' in html_text
