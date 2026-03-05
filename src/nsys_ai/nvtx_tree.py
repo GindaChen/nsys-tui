@@ -4,52 +4,63 @@ nvtx_tree.py — Build hierarchical NVTX trees with nested GPU kernels.
 Provides a "function stack trace" view: NVTX annotations form the tree
 structure, GPU kernels are leaves attached to their innermost NVTX range.
 
-Key design: builds the tree from the PRIMARY CPU thread for the target GPU
-(the thread with the most correlated kernel launches on that device).
-Mixing threads breaks containment-based nesting.
+Key design: builds separate per-thread trees, then merges them by GPU time.
+Each thread's tree preserves correct CPU call-stack nesting. Multiple threads
+are needed because PyTorch/autograd runs backward passes on separate
+``pt_autograd_*`` threads that are invisible from the primary training thread.
 """
 
 
-def _find_primary_thread(profile, device: int) -> int:
-    """Find the CPU thread with the most kernel launches on this device."""
+def _find_kernel_threads(profile, device: int) -> list[int]:
+    """Find all CPU threads that launch kernels on this device, ordered by launch count."""
     with profile._lock:
-        rows = profile.conn.execute("""
+        rows = profile.conn.execute(f"""
             SELECT r.globalTid, COUNT(*) as cnt
             FROM CUPTI_ACTIVITY_KIND_RUNTIME r
-            JOIN CUPTI_ACTIVITY_KIND_KERNEL k ON r.correlationId = k.correlationId
+            JOIN {profile.schema.kernel_table} k ON r.correlationId = k.correlationId
             WHERE k.deviceId = ?
-            GROUP BY r.globalTid ORDER BY cnt DESC LIMIT 1
-        """, (device,)).fetchone()
-    return rows[0] if rows else 0
+            GROUP BY r.globalTid ORDER BY cnt DESC
+        """, (device,)).fetchall()
+    return [r[0] for r in rows] if rows else []
 
 
-def build_nvtx_tree(profile, device: int, trim: tuple[int, int],
-                    pad: int = int(5e9)) -> list[dict]:
+def _find_primary_thread(profile, device: int) -> int:
+    """Find the CPU thread with the most kernel launches (backward-compat alias)."""
+    tids = _find_kernel_threads(profile, device)
+    return tids[0] if tids else 0
+
+
+def _get_thread_name(profile, tid: int) -> str:
+    """Look up thread name from ThreadNames+StringIds tables. Returns '' if unknown."""
+    try:
+        with profile._lock:
+            row = profile.conn.execute("""
+                SELECT s.value FROM ThreadNames t
+                JOIN StringIds s ON t.nameId = s.id
+                WHERE t.globalTid = ?
+                ORDER BY t.priority DESC LIMIT 1
+            """, (tid,)).fetchone()
+        return row[0] if row else ""
+    except Exception:
+        return ""
+
+
+def _build_single_thread_tree(profile, device: int, trim: tuple[int, int],
+                              tid: int, kmap: dict,
+                              pad: int = int(5e9)) -> list[dict]:
     """
-    Build a hierarchical tree of NVTX annotations with GPU kernels as leaves.
-
-    Uses only the primary thread's NVTX events (the thread that launches the
-    most kernels on the target device). This preserves the correct CPU call-stack
-    nesting that gets destroyed when mixing events from multiple threads.
+    Build an NVTX tree for a single thread's events on the target GPU.
 
     Each node: {name, start, end, type: "nvtx"|"kernel", stream?, children: [...]}
     """
-    kmap = profile.kernel_map(device)
-    if not kmap:
-        return []
-
-    primary_tid = _find_primary_thread(profile, device)
-    if not primary_tid:
-        return []
-
-    # Load runtime calls for primary thread
+    # Load runtime calls for this thread
     with profile._lock:
         rt_rows = profile.conn.execute("""
             SELECT start, [end], correlationId FROM CUPTI_ACTIVITY_KIND_RUNTIME
             WHERE globalTid = ? AND start >= ? AND [end] <= ?  ORDER BY start
-        """, (primary_tid, trim[0] - pad, trim[1] + int(2e9))).fetchall()
+        """, (tid, trim[0] - pad, trim[1] + int(2e9))).fetchall()
 
-    # Load NVTX for primary thread only
+    # Load NVTX for this thread only
     with profile._lock:
         nvtx_rows = profile.conn.execute("""
             SELECT text, start, [end] FROM NVTX_EVENTS
@@ -57,7 +68,7 @@ def build_nvtx_tree(profile, device: int, trim: tuple[int, int],
               AND globalTid = ?
               AND start >= ? AND start <= ?
             ORDER BY start
-        """, (primary_tid, trim[0] - pad, trim[1])).fetchall()
+        """, (tid, trim[0] - pad, trim[1])).fetchall()
 
     # Build projected entries: each NVTX span → projected GPU bounds + child kernels
     entries = []  # list of {name, gpu_start, gpu_end, cpu_start, cpu_end, kernels: [...]}
@@ -123,6 +134,41 @@ def build_nvtx_tree(profile, device: int, trim: tuple[int, int],
     _sort_children(roots)
 
     return roots
+
+
+def build_nvtx_tree(profile, device: int, trim: tuple[int, int],
+                    pad: int = int(5e9)) -> list[dict]:
+    """
+    Build a hierarchical tree of NVTX annotations with GPU kernels as leaves.
+
+    Discovers ALL CPU threads that launch kernels on the target device (e.g.
+    the main training thread for forward pass, ``pt_autograd_*`` threads for
+    backward pass), builds a per-thread NVTX tree for each, and merges the
+    roots by GPU start time.
+
+    Each root node is tagged with ``thread_name`` metadata.
+
+    Each node: {name, start, end, type: "nvtx"|"kernel", stream?, children: [...]}
+    """
+    kmap = profile.kernel_map(device)
+    if not kmap:
+        return []
+
+    kernel_tids = _find_kernel_threads(profile, device)
+    if not kernel_tids:
+        return []
+
+    all_roots = []
+    for tid in kernel_tids:
+        thread_name = _get_thread_name(profile, tid)
+        roots = _build_single_thread_tree(profile, device, trim, tid, kmap, pad)
+        for r in roots:
+            r["thread_name"] = thread_name
+        all_roots.extend(roots)
+
+    # Merge all threads' roots by GPU start time
+    all_roots.sort(key=lambda n: n["start"])
+    return all_roots
 
 
 def _sort_children(nodes):
@@ -201,6 +247,8 @@ def to_json(roots, parent_duration_ms: float = 0, path: str = "") -> list[dict]:
             d["stream"] = node["stream"]
         if node.get("demangled"):
             d["demangled"] = node["demangled"]
+        if node.get("thread_name"):
+            d["thread_name"] = node["thread_name"]
         if node.get("children"):
             d["children"] = to_json(node["children"], dur_ms, node_path)
         out.append(d)
