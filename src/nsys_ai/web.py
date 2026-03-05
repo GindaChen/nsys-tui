@@ -86,10 +86,17 @@ def _run_server(server, open_url, prof):
     if open_url:
         open_target = actual_url if (open_url and open_url.startswith("http://127.0.0.1:")) else open_url
         threading.Timer(0.3, webbrowser.open, args=(open_target,)).start()
-    # Ensure Ctrl-C always works
+    # Ensure Ctrl-C works without deadlocking BaseServer.shutdown().
+    # shutdown() must be called from a different thread than serve_forever().
+    _stopping = False
+
     def _sigint_handler(sig, frame):
+        nonlocal _stopping
+        if _stopping:
+            return
+        _stopping = True
         print("\nShutting down.")
-        server.shutdown()
+        threading.Thread(target=server.shutdown, daemon=True).start()
     signal.signal(signal.SIGINT, _sigint_handler)
     try:
         server.serve_forever()
