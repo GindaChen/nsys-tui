@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Performance Questions That Matter (Including MFU)</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #22d3ee;
+      --accent-2: #34d399;
+      --border: #1f2937;
+      --code: #0b1220;
+      --warn: #f59e0b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #020617 0%, #0f172a 35%, #111827 100%);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .wrap {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+    h1, h2, h3 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 2rem; }
+    h2 { font-size: 1.35rem; margin-top: 28px; }
+    h3 { font-size: 1.05rem; margin-top: 20px; color: var(--accent-2); }
+    p, li { color: var(--text); }
+    .sub { color: var(--muted); margin-top: 8px; }
+    .card {
+      background: rgba(17, 24, 39, 0.78);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-top: 14px;
+      backdrop-filter: blur(2px);
+    }
+    .note {
+      border-left: 3px solid var(--warn);
+      padding: 10px 12px;
+      background: rgba(245, 158, 11, 0.08);
+      color: #fde68a;
+      border-radius: 8px;
+      margin: 12px 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 0.95rem;
+    }
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid var(--border);
+      padding: 10px 8px;
+    }
+    th { color: var(--accent); font-weight: 700; }
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: var(--code);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    code { padding: 1px 6px; }
+    pre {
+      padding: 12px;
+      overflow-x: auto;
+      color: #c7d2fe;
+      margin: 8px 0 0;
+    }
+    .kpi {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .kpi > div {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      background: rgba(2, 6, 23, 0.55);
+    }
+    .kpi strong { color: var(--accent-2); display: block; }
+    .small { color: var(--muted); font-size: 0.92rem; }
+    a { color: #67e8f9; }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <h1>Performance Questions That Matter (Including MFU)</h1>
+    <p class="sub">
+      A curated set of high-value questions for GPU training performance analysis.
+      This is the shortlist to ask first, before deep-diving into dozens of secondary checks.
+    </p>
+
+    <section class="card">
+      <h2>1) The Top Questions To Ask First</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Priority</th>
+            <th>Question</th>
+            <th>Metric To Compute</th>
+            <th>Typical Action If Bad</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>P0</td>
+            <td>What is MFU right now, and what is its trend?</td>
+            <td><code>MFU = achieved_model_TFLOPS / peak_TFLOPS</code></td>
+            <td>Fix biggest non-compute bottleneck before kernel micro-optimizations.</td>
+          </tr>
+          <tr>
+            <td>P0</td>
+            <td>Where does step time go (compute vs comm vs idle)?</td>
+            <td>Step-time decomposition by category</td>
+            <td>Attack the dominant bucket first (NCCL, bubbles, or compute kernel).</td>
+          </tr>
+          <tr>
+            <td>P0</td>
+            <td>Is communication overlapping compute?</td>
+            <td>NCCL overlap ratio + NCCL share of step</td>
+            <td>Async comm, stream strategy, bucket sizing, topology checks.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Are there major GPU bubbles (idle gaps)?</td>
+            <td>Idle-gap ms and % of step span</td>
+            <td>Pipeline scheduling, input staging, synchronization cleanup.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Which kernels dominate runtime?</td>
+            <td>Top-kernel cumulative %</td>
+            <td>Kernel-level optimization/fusion/algorithm choice.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Are we losing time to many tiny kernels?</td>
+            <td>Launch overhead + tiny-kernel count</td>
+            <td>Fuse kernels, raise arithmetic intensity, reduce dispatch count.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Are H2D/D2H transfers in the critical path?</td>
+            <td>Transfer ms by direction + timeline placement</td>
+            <td>Prefetching, pinned memory, remove accidental host syncs.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Are ranks/GPUs imbalanced?</td>
+            <td>Per-rank step time distribution (p95/p50)</td>
+            <td>Data sharding, sequence packing, straggler root-cause analysis.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Is first iteration an outlier?</td>
+            <td>Warmup step vs steady-state step</td>
+            <td>Move compilation/init outside measured window.</td>
+          </tr>
+          <tr>
+            <td>P3</td>
+            <td>Did MFU improve after change X?</td>
+            <td>Before/after MFU + confidence interval</td>
+            <td>Keep only wins that survive repeated profiles.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>2) MFU: What It Is And How To Calculate It</h2>
+      <p>
+        <strong>MFU (Model FLOP Utilization)</strong> answers: how much of theoretical GPU compute peak is
+        being converted into <em>model math</em>.
+      </p>
+      <div class="kpi">
+        <div>
+          <strong>Step A: Model FLOPs per step</strong>
+          Estimate from model config and tokens/step.
+        </div>
+        <div>
+          <strong>Step B: Achieved model TFLOPS</strong>
+          <code>model_flops_per_step / step_time_s / 1e12</code>
+        </div>
+        <div>
+          <strong>Step C: MFU</strong>
+          <code>achieved_model_TFLOPS / peak_TFLOPS_per_gpu</code>
+        </div>
+      </div>
+
+      <h3>Core Formula</h3>
+      <pre><code>tokens_per_step = global_batch_size * sequence_length
+
+model_flops_per_step = flops_per_token * tokens_per_step
+
+achieved_model_tflops = (model_flops_per_step / step_time_s) / 1e12
+
+MFU = achieved_model_tflops / peak_tflops_per_gpu
+</code></pre>
+
+      <h3>Practical FLOPs-per-token Baseline</h3>
+      <p>
+        For dense Transformer training, a common rough baseline is:
+      </p>
+      <pre><code>flops_per_token ~ 6 * N_parameters</code></pre>
+      <p class="small">
+        This is a simplification. Real workloads need corrections for attention, MoE routing, activation
+        recompute, sequence parallelism, and optimizer variants.
+      </p>
+
+      <div class="note">
+        Nsight Systems alone does <strong>not</strong> directly provide true model FLOPs.
+        It provides timing and kernel traces. MFU needs model-side FLOP accounting inputs in addition to timeline data.
+      </div>
+
+      <h3>Cluster / Multi-GPU Variant</h3>
+      <pre><code>cluster_MFU =
+  total_model_flops_per_step
+  /
+  (num_gpus * peak_tflops_per_gpu * step_time_s)
+</code></pre>
+
+      <h3>MFU vs HFU (Do Not Mix Them)</h3>
+      <table>
+        <thead>
+          <tr><th>Metric</th><th>Numerator</th><th>Needs</th><th>Use Case</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>MFU</td>
+            <td>Model FLOPs/s (algorithmic math)</td>
+            <td>Model FLOP accounting + step time + peak TFLOPS</td>
+            <td>Training-system efficiency at the model level</td>
+          </tr>
+          <tr>
+            <td>HFU</td>
+            <td>Hardware FLOPs/s (instructions executed)</td>
+            <td>Hardware counters (typically Nsight Compute)</td>
+            <td>Kernel/hardware efficiency of executed instructions</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>3) What nsys-ai Can Compute Today vs What You Must Provide</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Input</th>
+            <th>Source</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Step time / iteration span</td>
+            <td>NVTX ranges or kernel timeline in Nsight SQLite</td>
+            <td>Available now</td>
+          </tr>
+          <tr>
+            <td>Compute/comm/idle decomposition</td>
+            <td>Kernel + NCCL + gap analysis</td>
+            <td>Available now</td>
+          </tr>
+          <tr>
+            <td>Model FLOPs per token/step</td>
+            <td>Model architecture and training recipe</td>
+            <td>Must be supplied</td>
+          </tr>
+          <tr>
+            <td>Peak TFLOPS for precision mode</td>
+            <td>GPU spec sheet for BF16/FP16/FP8 mode</td>
+            <td>Must be supplied</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>4) Minimal SQL Snippets For The Key Questions</h2>
+      <h3>Top kernels by total duration</h3>
+      <pre><code>SELECT s.value AS kernel_name,
+       COUNT(*) AS invocations,
+       ROUND(SUM(k.[end] - k.start) / 1e6, 2) AS total_ms
+FROM CUPTI_ACTIVITY_KIND_KERNEL k
+JOIN StringIds s ON k.demangledName = s.id
+GROUP BY s.value
+ORDER BY total_ms DESC
+LIMIT 15;</code></pre>
+
+      <h3>NCCL cost breakdown</h3>
+      <pre><code>SELECT s.value AS kernel_name,
+       COUNT(*) AS n,
+       ROUND(SUM(k.[end] - k.start) / 1e6, 2) AS total_ms
+FROM CUPTI_ACTIVITY_KIND_KERNEL k
+JOIN StringIds s ON k.shortName = s.id
+WHERE s.value LIKE '%nccl%' OR s.value LIKE '%NCCL%'
+GROUP BY s.value
+ORDER BY total_ms DESC;</code></pre>
+
+      <h3>Idle gaps (pipeline bubbles)</h3>
+      <pre><code>WITH ordered AS (
+  SELECT k.streamId, k.start, k.[end],
+         LAG(k.[end]) OVER (PARTITION BY k.streamId ORDER BY k.start) AS prev_end
+  FROM CUPTI_ACTIVITY_KIND_KERNEL k
+)
+SELECT streamId,
+       ROUND((start - prev_end) / 1e6, 3) AS gap_ms
+FROM ordered
+WHERE prev_end IS NOT NULL AND (start - prev_end) > 1000000
+ORDER BY gap_ms DESC
+LIMIT 20;</code></pre>
+      <p class="small">
+        These answer decomposition questions that are prerequisites for interpreting MFU correctly.
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>5) A Practical Workflow</h2>
+      <ol>
+        <li>Measure step time and decomposition (compute/comm/idle).</li>
+        <li>Compute MFU with explicit FLOPs-per-step assumptions.</li>
+        <li>State assumptions in report (precision, token count, FLOP model).</li>
+        <li>Fix the largest bottleneck category.</li>
+        <li>Re-profile and report MFU before/after with same workload.</li>
+      </ol>
+      <p class="small">
+        Related question list: <a href="./root-causes/veteran-questions.md">root-causes/veteran-questions.md</a>
+      </p>
+    </section>
+  </main>
+</body>
+</html>

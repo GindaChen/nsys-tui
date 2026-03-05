@@ -21,14 +21,17 @@ def test_import():
 
 
 def test_subcommands():
-    """All subcommands should be registered."""
+    """Public CLI surface should stay small and web/AI focused."""
     result = subprocess.run(
         [sys.executable, "-m", "nsys_ai", "--help"],
         capture_output=True, text=True)
-    for cmd in ['info', 'analyze', 'open', 'summary', 'overlap', 'nccl', 'iters', 'tree', 'markdown',
-                'search', 'export-csv', 'export-json', 'export', 'viewer', 'timeline-html',
-                'web', 'perfetto', 'timeline-web', 'tui', 'timeline', 'chat']:
+    for cmd in ['open', 'web', 'timeline-web', 'chat', 'ask', 'report', 'export']:
         assert cmd in result.stdout, f"Missing subcommand: {cmd}"
+
+    # Legacy command names should be hidden from top-level help.
+    usage_line = result.stdout.splitlines()[0]
+    for hidden in ["info", "summary", "overlap", "skill", "agent"]:
+        assert hidden not in usage_line
 
 
 def test_chat_subcommand_help():
@@ -38,3 +41,12 @@ def test_chat_subcommand_help():
         capture_output=True, text=True)
     assert result.returncode == 0
     assert "profile" in result.stdout
+
+
+def test_legacy_analyze_still_available():
+    """Hidden legacy command should still parse and show help."""
+    result = subprocess.run(
+        [sys.executable, "-m", "nsys_ai", "analyze", "--help"],
+        capture_output=True, text=True)
+    assert result.returncode == 0
+    assert "--gpu" in result.stdout

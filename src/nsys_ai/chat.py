@@ -27,12 +27,12 @@ from .chat_config import (  # noqa: F401
     get_available_models,
     get_default_model,
 )
-from .chat_tools import (  # noqa: F401
+from .ai.backend.chat_tools import (  # noqa: F401
     _build_system_prompt,
     _parse_tool_call,
     _tools_openai,
 )
-from .tools_profile import (
+from .ai.backend.profile_db_tool import (
     get_profile_schema_cached,
     open_profile_readonly,
     query_profile_db,
