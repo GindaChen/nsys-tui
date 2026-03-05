@@ -27,9 +27,25 @@ That's it. No system dependencies, no CUDA required. Just Python 3.10+.
 
 ---
 
+## 🌐 Web UI First (Default)
+
+`nsys-ai` is web-first. The default command opens the timeline UI in your browser.
+
+```bash
+# Default: open web timeline UI
+nsys-ai my_training.nsys-rep
+
+# Explicit command (same web UI)
+nsys-ai timeline-web my_training.nsys-rep
+```
+
+Use TUI/CLI modes when you specifically want terminal workflows.
+
+---
+
 ## 🎯 What It Does
 
-nsys-ai reads `.nsys-rep` or `.sqlite` profile exports from [NVIDIA Nsight Systems](https://developer.nvidia.com/nsight-systems) and gives you **four ways** to explore them:
+nsys-ai reads `.nsys-rep` or `.sqlite` profile exports from [NVIDIA Nsight Systems](https://developer.nvidia.com/nsight-systems) and gives you a **web-first workflow** plus terminal and export tools:
 
 <table>
 <tr>
@@ -121,13 +137,13 @@ python download_data.py
 ### 2. Explore it
 
 ```bash
-# One command — opens the web timeline in your browser
+# Start here: one command opens the web timeline in your browser
 nsys-ai my_training.nsys-rep
 
 # Or explicitly:
 nsys-ai timeline-web my_training.nsys-rep
 
-# Quick overview
+# Then use overview/summaries as needed
 nsys-ai info my_training.nsys-rep
 
 # GPU kernel summary
