@@ -106,7 +106,8 @@
             background: var(--border)
         }
 
-        .toolbar input {
+        .toolbar input,
+        .toolbar select {
             background: var(--surface);
             border: 1px solid var(--border);
             color: var(--text);
@@ -416,6 +417,9 @@
         <button onclick="fitAll()" title="Home">⌂ Fit</button>
         <div class="sep"></div>
         <button onclick="toggleNVTX()" id="nvtxBtn" class="active">NVTX</button>
+        <select id="nvtxThreadSel" onchange="onNvtxThreadChange()" style="width:180px" title="NVTX thread filter">
+            <option value="auto">NVTX: Auto thread</option>
+        </select>
         <button onclick="toggleStreamFilter()" id="streamFilterBtn">Streams</button>
         <div class="sep"></div>
         <input type="text" id="searchInput" placeholder="/ to search kernels..." oninput="onSearch()">
@@ -517,9 +521,13 @@
                 this.tiles = new Map();  // key "start_s-end_s" → {data, ts, sizeEst}
                 this.maxBytes = maxBytes;
                 this.currentBytes = 0;
+                this.nvtxReady = new Set();
             }
             key(startS, endS) { return `${startS.toFixed(1)}-${endS.toFixed(1)}`; }
             has(startS, endS) { return this.tiles.has(this.key(startS, endS)); }
+            nvtxKey(startS, endS, gpuId) { return `${this.key(startS, endS)}|gpu:${gpuId}`; }
+            hasNvtx(startS, endS, gpuId) { return this.nvtxReady.has(this.nvtxKey(startS, endS, gpuId)); }
+            markNvtx(startS, endS, gpuId) { this.nvtxReady.add(this.nvtxKey(startS, endS, gpuId)); }
             get(startS, endS) {
                 const k = this.key(startS, endS);
                 const entry = this.tiles.get(k);
@@ -533,6 +541,17 @@
                 this.tiles.set(k, { data, ts: Date.now(), sizeEst });
                 this.currentBytes += sizeEst;
             }
+            mergeNvtx(startS, endS, nvtxData, gpuId) {
+                const k = this.key(startS, endS);
+                const entry = this.tiles.get(k);
+                if (!entry || !entry.data || !entry.data.gpus || !nvtxData || !nvtxData.gpus) return;
+                for (const ng of nvtxData.gpus) {
+                    const eg = entry.data.gpus.find(g => g.id === ng.id);
+                    if (!eg) continue;
+                    if (Array.isArray(ng.nvtx_spans)) eg.nvtx_spans = ng.nvtx_spans;
+                }
+                this.markNvtx(startS, endS, gpuId);
+            }
             // Get all cached data merged
             allData() {
                 const merged = { gpus: [] };
@@ -540,15 +559,47 @@
                 for (const [, entry] of this.tiles) {
                     if (!entry.data || !entry.data.gpus) continue;
                     for (const gpu of entry.data.gpus) {
-                        if (!gpuMap[gpu.id]) { gpuMap[gpu.id] = []; merged.gpus.push({ id: gpu.id, data: [] }); }
-                        const idx = merged.gpus.findIndex(g => g.id === gpu.id);
-                        merged.gpus[idx].data.push(...gpu.data);
+                        if (gpu.kernels) {
+                            if (gpuMap[gpu.id] === undefined) {
+                                gpuMap[gpu.id] = merged.gpus.length;
+                                merged.gpus.push({ id: gpu.id, kernels: [], nvtx_spans: [] });
+                            }
+                            const idx = gpuMap[gpu.id];
+                            merged.gpus[idx].kernels.push(...(gpu.kernels || []));
+                            merged.gpus[idx].nvtx_spans.push(...(gpu.nvtx_spans || []));
+                        } else {
+                            if (gpuMap[gpu.id] === undefined) {
+                                gpuMap[gpu.id] = merged.gpus.length;
+                                merged.gpus.push({ id: gpu.id, data: [] });
+                            }
+                            const idx = gpuMap[gpu.id];
+                            merged.gpus[idx].data.push(...(gpu.data || []));
+                        }
                     }
+                }
+                // De-duplicate entries that appear in adjacent tiles.
+                for (const g of merged.gpus) {
+                    if (!g.kernels) continue;
+                    const kSeen = new Set();
+                    g.kernels = g.kernels.filter(k => {
+                        const key = `${k.start_ns}|${k.end_ns}|${k.stream}|${k.name}`;
+                        if (kSeen.has(key)) return false;
+                        kSeen.add(key);
+                        return true;
+                    });
+                    const nSeen = new Set();
+                    g.nvtx_spans = g.nvtx_spans.filter(s => {
+                        const key = `${s.start}|${s.end}|${s.depth}|${s.path}|${s.thread || ''}`;
+                        if (nSeen.has(key)) return false;
+                        nSeen.add(key);
+                        return true;
+                    });
                 }
                 return merged;
             }
         }
         const tileCache = new TileCache();
+        const nvtxInflight = new Set();
         let profileMeta = null;  // {time_range_ns, gpus, device_ids}
         let isLoading = false;
 
@@ -571,13 +622,43 @@
         }
 
         // ── Fetch data for a time window ──
-        async function fetchTile(startS, endS) {
+        async function fetchTile(startS, endS, { requestNvtx = false } = {}) {
             if (tileCache.has(startS, endS)) return tileCache.get(startS, endS);
-            const resp = await fetch(`/api/data?start_s=${startS}&end_s=${endS}`);
+            const resp = await fetch(`/api/data?start_s=${startS}&end_s=${endS}&kernels=1&nvtx=0`);
             const data = await resp.json();
             if (data.error) { console.error('fetchTile error:', data.error); return null; }
             tileCache.put(startS, endS, data);
+            if (requestNvtx && showNVTX) void fetchTileNvtx(startS, endS, currentActiveGpuId());
             return data;
+        }
+
+        function currentActiveGpuId() {
+            if (isMultiGPU && streamIds[selectedStreamIdx]) {
+                const parts = String(streamIds[selectedStreamIdx]).split(':');
+                const maybeGpu = parseInt(parts[0], 10);
+                if (!isNaN(maybeGpu)) return maybeGpu;
+            }
+            if (gpuIds.length > 0) return gpuIds[0];
+            if (profileMeta && Array.isArray(profileMeta.device_ids) && profileMeta.device_ids.length > 0) {
+                return profileMeta.device_ids[0];
+            }
+            return null;
+        }
+
+        async function fetchTileNvtx(startS, endS, gpuId) {
+            const key = `${tileCache.key(startS, endS)}|gpu:${gpuId}`;
+            if (tileCache.hasNvtx(startS, endS, gpuId) || nvtxInflight.has(key)) return;
+            nvtxInflight.add(key);
+            try {
+                const resp = await fetch(`/api/data?start_s=${startS}&end_s=${endS}&kernels=0&nvtx=1&gpu=${gpuId}`);
+                const data = await resp.json();
+                if (data.error) { console.error('fetchTileNvtx error:', data.error); return; }
+                tileCache.mergeNvtx(startS, endS, data, gpuId);
+                rebuildDataFromCache();
+                draw();
+            } finally {
+                nvtxInflight.delete(key);
+            }
         }
 
         // ── Quantize view to tile boundaries ──
@@ -605,6 +686,22 @@
                 hideLoading();
                 rebuildDataFromCache();
             }
+            if (showNVTX) {
+                maybeFetchNvtxForCurrentView();
+            }
+        }
+
+        function maybeFetchNvtxForCurrentView() {
+            if (!PROGRESSIVE || !showNVTX) return;
+            const startTile = tileBounds(viewStart);
+            const endTile = tileBounds(viewEnd);
+            const activeGpu = currentActiveGpuId();
+            if (activeGpu === null || activeGpu === undefined) return;
+            for (let s = startTile[0]; s < endTile[1]; s += TILE_WINDOW_S) {
+                if (tileCache.has(s, s + TILE_WINDOW_S)) {
+                    void fetchTileNvtx(s, s + TILE_WINDOW_S, activeGpu);
+                }
+            }
         }
 
         // ── Background prefetch ±1 tile on idle ──
@@ -620,10 +717,10 @@
                     const pStartS = profileMeta.time_range_ns[0] / 1e9;
                     const pEndS = profileMeta.time_range_ns[1] / 1e9;
                     if (before[0] >= pStartS && !tileCache.has(before[0], before[1])) {
-                        fetchTile(before[0], before[1]).then(() => { rebuildDataFromCache(); draw(); });
+                        fetchTile(before[0], before[1], { requestNvtx: false }).then(() => { rebuildDataFromCache(); draw(); });
                     }
                     if (after[1] <= pEndS && !tileCache.has(after[0], after[1])) {
-                        fetchTile(after[0], after[1]).then(() => { rebuildDataFromCache(); draw(); });
+                        fetchTile(after[0], after[1], { requestNvtx: false }).then(() => { rebuildDataFromCache(); draw(); });
                     }
                 }
             });
@@ -668,6 +765,7 @@
                                 depth: s.depth || 0,
                                 path: s.path || '',
                                 dur: s.dur || 0,
+                                thread: s.thread || '(unnamed)',
                                 gpu: gpuEntry.id
                             });
                         }
@@ -750,6 +848,7 @@
                 `<span>Kernels: <strong>${totalKernels}</strong></span> &nbsp; ` +
                 `<span>NVTX: <strong>${totalNVTX}</strong></span> &nbsp; ` +
                 `<span>GPU time: <strong>${totalMs.toFixed(1)}ms</strong></span>`;
+            updateNvtxThreadOptions();
         }
 
         // ── Initialization ──
@@ -772,24 +871,25 @@
                 try {
                     const saved = JSON.parse(localStorage.getItem(_viewKey));
                     if (saved && saved.s !== undefined && saved.e !== undefined) {
-                        // Load tiles for saved viewport
-                        await ensureTilesForView(saved.s, saved.e);
-                        rebuildDataFromCache();
+                        // Set view first so NVTX fetch targets the correct viewport/GPU.
                         viewStart = saved.s;
                         viewEnd = saved.e;
+                        await ensureTilesForView(viewStart, viewEnd);
+                        rebuildDataFromCache();
                         restored = true;
                     }
                 } catch (e) { }
                 if (!restored) {
                     // Default view: first 5 seconds
                     const firstEnd = TILE_WINDOW_S;
-                    await fetchTile(0, firstEnd);
-                    rebuildDataFromCache();
                     viewStart = 0;
                     viewEnd = firstEnd * 1e9;
+                    await ensureTilesForView(viewStart, viewEnd);
+                    rebuildDataFromCache();
                 }
                 hideLoading();
                 resize();
+                if (showNVTX) maybeFetchNvtxForCurrentView();
                 prefetchAdjacent();
             } catch (e) {
                 hideLoading();
@@ -804,6 +904,7 @@
         let selectedKernel = null;
         let selectedStreamIdx = 0;
         let showNVTX = true;
+        let selectedNvtxThread = 'auto';
         let searchQuery = '';
         let searchMatches = new Set();
         let isDragging = false, dragStartX = 0, dragViewStart = 0, dragViewEnd = 0;
@@ -833,6 +934,75 @@
         function fmtDur(ms) { return ms >= 1 ? ms.toFixed(2) + 'ms' : (ms * 1000).toFixed(0) + 'μs'; }
         function fmtNs(ns) { return (ns / 1e6).toFixed(3) + 'ms'; }
 
+        function activeGpuNvtxSpans() {
+            const activeGpu = currentActiveGpuId();
+            const spans = isMultiGPU ? nvtxSpans.filter(s => s.gpu === activeGpu) : nvtxSpans.slice();
+            return { activeGpu, spans };
+        }
+
+        function dominantNvtxThread(spans) {
+            const counts = new Map();
+            for (const s of spans) {
+                const t = s.thread || '(unnamed)';
+                counts.set(t, (counts.get(t) || 0) + 1);
+            }
+            let best = null;
+            let bestCount = -1;
+            for (const [t, c] of counts.entries()) {
+                if (c > bestCount) {
+                    bestCount = c;
+                    best = t;
+                }
+            }
+            return best;
+        }
+
+        function activeNvtxSpans() {
+            const { activeGpu, spans } = activeGpuNvtxSpans();
+            if (!spans.length) return { activeGpu, thread: null, spans: [] };
+            const thread = selectedNvtxThread === 'auto' ? dominantNvtxThread(spans) : selectedNvtxThread;
+            const filtered = thread ? spans.filter(s => (s.thread || '(unnamed)') === thread) : spans;
+            return { activeGpu, thread, spans: filtered };
+        }
+
+        function activeNvtxMaxDepth() {
+            const { spans } = activeNvtxSpans();
+            return spans.length ? Math.min(6, Math.max(...spans.map(s => s.depth || 0)) + 1) : 0;
+        }
+
+        function updateNvtxThreadOptions() {
+            const sel = document.getElementById('nvtxThreadSel');
+            if (!sel) return;
+            const { spans } = activeGpuNvtxSpans();
+            const counts = new Map();
+            for (const s of spans) {
+                const t = s.thread || '(unnamed)';
+                counts.set(t, (counts.get(t) || 0) + 1);
+            }
+            const options = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+            const current = selectedNvtxThread;
+            sel.innerHTML = '';
+            const autoOpt = document.createElement('option');
+            autoOpt.value = 'auto';
+            autoOpt.textContent = 'NVTX: Auto thread';
+            sel.appendChild(autoOpt);
+            for (const [t, c] of options) {
+                const opt = document.createElement('option');
+                opt.value = t;
+                opt.textContent = `${t} (${c})`;
+                sel.appendChild(opt);
+            }
+            const hasCurrent = current !== 'auto' && options.some(([t]) => t === current);
+            selectedNvtxThread = hasCurrent ? current : 'auto';
+            sel.value = selectedNvtxThread;
+        }
+
+        function onNvtxThreadChange() {
+            const sel = document.getElementById('nvtxThreadSel');
+            selectedNvtxThread = sel ? sel.value : 'auto';
+            draw();
+        }
+
         // ── Resize ──
         function contentHeight() {
             // Total height needed: ruler + NVTX + GPU separators + all stream rows
@@ -861,7 +1031,10 @@
             return viewStart + (x - LABEL_W) / w * (viewEnd - viewStart);
         }
 
-        function nvtxAreaH() { return showNVTX && nvtxSpans.length ? nvtxMaxDepth * NVTX_ROW_H + 4 : 0; }
+        function nvtxAreaH() {
+            const d = activeNvtxMaxDepth();
+            return showNVTX && d > 0 ? d * NVTX_ROW_H + 4 : 0;
+        }
 
         // Compute Y position for a stream index, accounting for GPU separator rows
         function streamY(idx) {
@@ -925,16 +1098,11 @@
             ctx.fillStyle = 'rgba(22, 27, 34, 0.85)';
             ctx.fillRect(0, baseY, W, nvtxAreaH());
 
-            // In multi-GPU mode, only show NVTX for the GPU of the selected stream
-            let activeGpu = null;
-            if (isMultiGPU && streamIds[selectedStreamIdx]) {
-                const parts = streamIds[selectedStreamIdx].split(':');
-                activeGpu = parseInt(parts[0]);
-            }
+            const { activeGpu, thread, spans: visibleSpans } = activeNvtxSpans();
+            const depthMax = activeNvtxMaxDepth();
 
-            for (const span of nvtxSpans) {
-                if (isMultiGPU && activeGpu !== null && span.gpu !== activeGpu) continue;
-                if (span.depth >= nvtxMaxDepth) continue;
+            for (const span of visibleSpans) {
+                if ((span.depth || 0) >= depthMax) continue;
                 const x1 = Math.max(LABEL_W, nsToX(span.start));
                 const x2 = Math.min(W, nsToX(span.end));
                 if (x2 < LABEL_W || x1 > W) continue;
@@ -966,20 +1134,21 @@
             }
 
             // NVTX depth labels
-            for (let d = 0; d < nvtxMaxDepth; d++) {
+            for (let d = 0; d < depthMax; d++) {
                 ctx.fillStyle = '#8b949e';
                 ctx.textAlign = 'right';
                 ctx.textBaseline = 'middle';
                 ctx.font = '9px SF Mono, monospace';
                 ctx.fillText('L' + d, LABEL_W - 6, baseY + d * NVTX_ROW_H + NVTX_ROW_H / 2);
             }
-            // Show which GPU's NVTX is displayed
-            if (isMultiGPU && activeGpu !== null) {
+            // Show which GPU/thread NVTX is displayed
+            if (depthMax > 0) {
                 ctx.fillStyle = GPU_SEP_COLORS[gpuIds.indexOf(activeGpu) % GPU_SEP_COLORS.length];
                 ctx.font = '9px SF Mono, monospace';
                 ctx.textAlign = 'left';
                 ctx.textBaseline = 'top';
-                ctx.fillText(`NVTX: GPU ${activeGpu}`, LABEL_W + 4, baseY + 2);
+                const threadLabel = thread ? ` • ${thread}` : '';
+                ctx.fillText(`NVTX: GPU ${activeGpu}${threadLabel}`, LABEL_W + 4, baseY + 2);
             }
             ctx.font = '11px SF Mono, Cascadia Code, Fira Code, monospace';
 
@@ -1342,7 +1511,11 @@
         function toggleNVTX() {
             showNVTX = !showNVTX;
             document.getElementById('nvtxBtn').classList.toggle('active', showNVTX);
+            updateNvtxThreadOptions();
             draw();
+            if (showNVTX) {
+                void ensureTilesForView(viewStart, viewEnd);
+            }
         }
 
         function toggleStreamFilter() {
@@ -1418,6 +1591,8 @@
             const hit = hitTest(mx, my);
             if (hit) {
                 selectedStreamIdx = hit.streamIdx;
+                updateNvtxThreadOptions();
+                maybeFetchNvtxForCurrentView();
                 if (hit.kernel) { selectKernel(hit.kernel); return; }
             }
 
@@ -1553,8 +1728,20 @@
             switch (e.key) {
                 case 'ArrowLeft': case 'h': e.preventDefault(); panBy(-0.15); break;
                 case 'ArrowRight': case 'l': e.preventDefault(); panBy(0.15); break;
-                case 'ArrowUp': case 'k': e.preventDefault(); selectedStreamIdx = Math.max(0, selectedStreamIdx - 1); draw(); break;
-                case 'ArrowDown': case 'j': e.preventDefault(); selectedStreamIdx = Math.min(streamIds.length - 1, selectedStreamIdx + 1); draw(); break;
+                case 'ArrowUp': case 'k':
+                    e.preventDefault();
+                    selectedStreamIdx = Math.max(0, selectedStreamIdx - 1);
+                    updateNvtxThreadOptions();
+                    maybeFetchNvtxForCurrentView();
+                    draw();
+                    break;
+                case 'ArrowDown': case 'j':
+                    e.preventDefault();
+                    selectedStreamIdx = Math.min(streamIds.length - 1, selectedStreamIdx + 1);
+                    updateNvtxThreadOptions();
+                    maybeFetchNvtxForCurrentView();
+                    draw();
+                    break;
                 case '+': case '=': zoomIn(); break;
                 case '-': case '_': zoomOut(); break;
                 case 'Home': case '0': fitAll(); break;
@@ -1749,6 +1936,8 @@
                     if (k) {
                         const si = streamIds.indexOf(String(k.stream));
                         if (si >= 0) selectedStreamIdx = si;
+                        updateNvtxThreadOptions();
+                        maybeFetchNvtxForCurrentView();
                         selectKernel(k);
                         ensureVisible(k);
                         appendChatMsg('system', '→ Navigated to: ' + k.name.slice(0, 60), 'system');

@@ -54,9 +54,15 @@ def write_html(prof, device: int, trim: tuple[int, int], path: str):
         f.write(generate_html(prof, device, trim))
 
 
-def _collect_nvtx_annotations(nodes: list[dict], spans: list[dict], kernel_paths: dict[tuple, str]) -> None:
+def _collect_nvtx_annotations(
+    nodes: list[dict],
+    spans: list[dict],
+    kernel_paths: dict[tuple, str],
+    current_thread: str = "",
+) -> None:
     """Collect flat NVTX spans and kernel-path annotations from a tree JSON."""
     for node in nodes:
+        thread_name = node.get("thread_name") or current_thread
         ntype = node.get("type")
         if ntype == "nvtx":
             path = node.get("path", "")
@@ -68,6 +74,7 @@ def _collect_nvtx_annotations(nodes: list[dict], spans: list[dict], kernel_paths
                 "depth": depth,
                 "path": path,
                 "dur": node.get("duration_ms", 0),
+                "thread": thread_name or "(unnamed)",
             })
         elif ntype == "kernel":
             key = (
@@ -80,11 +87,18 @@ def _collect_nvtx_annotations(nodes: list[dict], spans: list[dict], kernel_paths
 
         children = node.get("children") or []
         if children:
-            _collect_nvtx_annotations(children, spans, kernel_paths)
+            _collect_nvtx_annotations(children, spans, kernel_paths, thread_name)
 
 
-def build_timeline_gpu_data(prof, device, trim: tuple[int, int]) -> list[dict]:
-    """Build per-GPU timeline payload with kernel-first rows + optional NVTX annotations."""
+def build_timeline_gpu_data(
+    prof,
+    device,
+    trim: tuple[int, int],
+    *,
+    include_kernels: bool = True,
+    include_nvtx: bool = True,
+) -> list[dict]:
+    """Build per-GPU timeline payload with kernel rows plus optional NVTX annotations."""
     from collections.abc import Sequence
     from .nvtx_tree import build_nvtx_tree as build_nvtx_tree_all_threads, to_json as nvtx_to_json
 
@@ -92,47 +106,49 @@ def build_timeline_gpu_data(prof, device, trim: tuple[int, int]) -> list[dict]:
     gpu_entries: list[dict] = []
 
     for dev in devices:
-        # 1) Kernel-first: authoritative source for timeline rows.
-        sql = f"""
-            SELECT k.start AS start_ns, k.[end] AS end_ns, k.streamId AS stream,
-                   s.value AS name
-            FROM {prof.schema.kernel_table} k
-            JOIN StringIds s ON k.shortName = s.id
-            WHERE k.deviceId = ? AND k.[end] >= ? AND k.start <= ?
-            ORDER BY k.start
-        """
-        with prof._lock:
-            rows = prof.conn.execute(sql, (dev, trim[0], trim[1])).fetchall()
-
         kernels = []
-        for r in rows:
-            start_ns = int(r["start_ns"])
-            end_ns = int(r["end_ns"])
-            kernels.append({
-                "type": "kernel",
-                "name": r["name"],
-                "start_ns": start_ns,
-                "end_ns": end_ns,
-                "duration_ms": round((end_ns - start_ns) / 1e6, 3),
-                "stream": r["stream"],
-                "path": "",
-            })
+        if include_kernels:
+            # 1) Kernel-first: authoritative source for timeline rows.
+            sql = f"""
+                SELECT k.start AS start_ns, k.[end] AS end_ns, k.streamId AS stream,
+                       s.value AS name
+                FROM {prof.schema.kernel_table} k
+                JOIN StringIds s ON k.shortName = s.id
+                WHERE k.deviceId = ? AND k.[end] >= ? AND k.start <= ?
+                ORDER BY k.start
+            """
+            with prof._lock:
+                rows = prof.conn.execute(sql, (dev, trim[0], trim[1])).fetchall()
+
+            for r in rows:
+                start_ns = int(r["start_ns"])
+                end_ns = int(r["end_ns"])
+                kernels.append({
+                    "type": "kernel",
+                    "name": r["name"],
+                    "start_ns": start_ns,
+                    "end_ns": end_ns,
+                    "duration_ms": round((end_ns - start_ns) / 1e6, 3),
+                    "stream": r["stream"],
+                    "path": "",
+                })
 
         # 2) NVTX-only annotations + kernel->path labels.
         #    NVTX is advisory metadata; missing mapping must not drop kernels.
-        try:
-            roots = build_nvtx_tree_all_threads(prof, dev, trim)
-            tree_json = nvtx_to_json(roots)
-        except Exception:
-            tree_json = []
-
         nvtx_spans: list[dict] = []
         kernel_paths: dict[tuple, str] = {}
-        _collect_nvtx_annotations(tree_json, nvtx_spans, kernel_paths)
+        if include_nvtx:
+            try:
+                roots = build_nvtx_tree_all_threads(prof, dev, trim)
+                tree_json = nvtx_to_json(roots)
+            except Exception:
+                tree_json = []
+            _collect_nvtx_annotations(tree_json, nvtx_spans, kernel_paths)
 
-        for k in kernels:
-            key = (k["start_ns"], k["end_ns"], k["stream"], k["name"])
-            k["path"] = kernel_paths.get(key, k["name"])
+        if include_kernels:
+            for k in kernels:
+                key = (k["start_ns"], k["end_ns"], k["stream"], k["name"])
+                k["path"] = kernel_paths.get(key, k["name"])
 
         gpu_entries.append({"id": dev, "kernels": kernels, "nvtx_spans": nvtx_spans})
 

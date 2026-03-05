@@ -138,7 +138,9 @@ class _ViewerHandler(BaseHTTPRequestHandler):
     html_bytes: bytes = b""
     prof = None           # set by serve_timeline
     devices: list = []    # set by serve_timeline
-    _prebuilt_data: list = []  # pre-built full NVTX tree per GPU
+    _prebuilt_data: list = []  # pre-built timeline payload per GPU
+    _prebuilt_nvtx_mode: str = "full"  # "full" (prebuilt has NVTX) or "tile" (compute per tile)
+    _tile_nvtx_cache: dict = {}  # (start_ns, end_ns, devices_tuple) -> {gpu_id: [nvtx_spans]}
 
     def do_GET(self):
         path = self.path.split("?")[0]
@@ -199,16 +201,74 @@ class _ViewerHandler(BaseHTTPRequestHandler):
             end_s = float(qs.get("end_s", [5])[0])
         except (ValueError, IndexError):
             start_s, end_s = 0, 5
+        nvtx_requested = str(qs.get("nvtx", ["0"])[0]).lower() in ("1", "true", "yes")
+        kernels_requested = str(qs.get("kernels", ["1"])[0]).lower() not in ("0", "false", "no")
+        gpu_filter = None
+        try:
+            gpu_filter_raw = qs.get("gpu", [None])[0]
+            if gpu_filter_raw is not None and str(gpu_filter_raw).strip() != "":
+                gpu_filter = int(gpu_filter_raw)
+        except (ValueError, TypeError):
+            gpu_filter = None
         start_ns = int(start_s * 1e9)
         end_ns = int(end_s * 1e9)
         t0 = _time.monotonic()
-        print(f"[tile] {start_s:.1f}s–{end_s:.1f}s  filtering...", flush=True)
+        print(
+            f"[tile] {start_s:.1f}s–{end_s:.1f}s  filtering "
+            f"(kernels={'1' if kernels_requested else '0'}, nvtx={'1' if nvtx_requested else '0'}, "
+            f"gpu={gpu_filter if gpu_filter is not None else 'all'})...",
+            flush=True,
+        )
         try:
+            nvtx_spans_by_gpu = None
+            if self.__class__._prebuilt_nvtx_mode == "tile" and nvtx_requested:
+                annotate_devices = (
+                    [gpu_filter]
+                    if gpu_filter is not None and gpu_filter in self.__class__.devices
+                    else self.__class__.devices
+                )
+                devices_key = tuple(annotate_devices)
+                tile_key = (start_ns, end_ns, devices_key)
+                nvtx_spans_by_gpu = self.__class__._tile_nvtx_cache.get(tile_key)
+                if nvtx_spans_by_gpu is None:
+                    t_nv = _time.monotonic()
+                    print(f"[tile] {start_s:.1f}s–{end_s:.1f}s  NVTX annotate...", flush=True)
+                    tile_nvtx_entries = build_timeline_gpu_data(
+                        self.__class__.prof,
+                        annotate_devices,
+                        (start_ns, end_ns),
+                        include_kernels=False,
+                        include_nvtx=True,
+                    )
+                    nvtx_spans_by_gpu = {
+                        e["id"]: e.get("nvtx_spans", []) for e in tile_nvtx_entries
+                    }
+                    self.__class__._tile_nvtx_cache[tile_key] = nvtx_spans_by_gpu
+                    # Keep memory bounded (simple LRU via insertion-ordered dict semantics).
+                    while len(self.__class__._tile_nvtx_cache) > 64:
+                        self.__class__._tile_nvtx_cache.pop(next(iter(self.__class__._tile_nvtx_cache)))
+                    print(
+                        f"[tile] {start_s:.1f}s–{end_s:.1f}s  NVTX done in "
+                        f"{_time.monotonic() - t_nv:.3f}s",
+                        flush=True,
+                    )
+
             # Filter pre-built data by time window
             gpu_entries = []
             for gpu_data in prebuilt:
                 if "kernels" in gpu_data:
-                    gpu_entries.append(_filter_timeline_gpu_entry(gpu_data, start_ns, end_ns))
+                    filtered = _filter_timeline_gpu_entry(
+                        gpu_data,
+                        start_ns,
+                        end_ns,
+                        filter_kernels=kernels_requested,
+                        filter_nvtx=self.__class__._prebuilt_nvtx_mode == "full",
+                    )
+                    if nvtx_spans_by_gpu is not None:
+                        filtered["nvtx_spans"] = nvtx_spans_by_gpu.get(
+                            filtered["id"], []
+                        )
+                    gpu_entries.append(filtered)
                 else:
                     # Backward-compatible fallback for older in-memory format.
                     filtered = _filter_nodes_by_time(gpu_data["data"], start_ns, end_ns)
@@ -222,6 +282,8 @@ class _ViewerHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
         except Exception as e:
             elapsed = _time.monotonic() - t0
             print(f"[tile] {start_s:.1f}s–{end_s:.1f}s  ERROR in {elapsed:.2f}s: {e}", flush=True)
@@ -330,16 +392,29 @@ def _filter_nodes_by_time(nodes: list, start_ns: int, end_ns: int) -> list:
     return result
 
 
-def _filter_timeline_gpu_entry(gpu_entry: dict, start_ns: int, end_ns: int) -> dict:
+def _filter_timeline_gpu_entry(
+    gpu_entry: dict,
+    start_ns: int,
+    end_ns: int,
+    *,
+    filter_kernels: bool = True,
+    filter_nvtx: bool = True,
+) -> dict:
     """Filter kernel-first timeline payload to a time window."""
-    kernels = [
-        k for k in gpu_entry.get("kernels", [])
-        if k.get("end_ns", 0) >= start_ns and k.get("start_ns", 0) <= end_ns
-    ]
-    nvtx_spans = [
-        s for s in gpu_entry.get("nvtx_spans", [])
-        if s.get("end", 0) >= start_ns and s.get("start", 0) <= end_ns
-    ]
+    if filter_kernels:
+        kernels = [
+            k for k in gpu_entry.get("kernels", [])
+            if k.get("end_ns", 0) >= start_ns and k.get("start_ns", 0) <= end_ns
+        ]
+    else:
+        kernels = []
+    if filter_nvtx:
+        nvtx_spans = [
+            s for s in gpu_entry.get("nvtx_spans", [])
+            if s.get("end", 0) >= start_ns and s.get("start", 0) <= end_ns
+        ]
+    else:
+        nvtx_spans = []
     return {"id": gpu_entry.get("id"), "kernels": kernels, "nvtx_spans": nvtx_spans}
 
 
@@ -357,13 +432,16 @@ def serve_timeline(prof, device, trim: tuple[int, int] | None = None, *,
     # Store prof + devices on handler for /api/meta queries
     _ViewerHandler.prof = prof
     _ViewerHandler.devices = devices
+    _ViewerHandler._tile_nvtx_cache = {}
 
     if trim is not None:
         # Legacy: render full HTML with all data baked in
         html = generate_timeline_html(prof, devices, trim)
+        _ViewerHandler._prebuilt_nvtx_mode = "full"
     else:
         # Progressive: generate shell HTML, data fetched via /api/data
         html = generate_timeline_html(prof, devices, None)
+        _ViewerHandler._prebuilt_nvtx_mode = "tile"
 
     _ViewerHandler.html_bytes = html.encode("utf-8")
 
@@ -371,7 +449,7 @@ def serve_timeline(prof, device, trim: tuple[int, int] | None = None, *,
     if trim is None:
         import os
         db_path = prof.path if hasattr(prof, 'path') else ''
-        cache_path = db_path + '.timeline-cache-v2.json' if db_path else ''
+        cache_path = db_path + '.timeline-cache-v3-kernels.json' if db_path else ''
         cache_valid = False
 
         # Try loading from disk cache
@@ -401,9 +479,18 @@ def serve_timeline(prof, device, trim: tuple[int, int] | None = None, *,
         if not cache_valid:
             t0 = _time.monotonic()
             full_range = prof.meta.time_range
-            print(f"Pre-building kernel-first timeline payload for {len(devices)} GPU(s) "
-                  f"({full_range[0]/1e9:.1f}s–{full_range[1]/1e9:.1f}s)...", flush=True)
-            prebuilt = build_timeline_gpu_data(prof, devices, full_range)
+            print(
+                f"Pre-building kernels only for {len(devices)} GPU(s) "
+                f"({full_range[0]/1e9:.1f}s–{full_range[1]/1e9:.1f}s)...",
+                flush=True,
+            )
+            prebuilt = build_timeline_gpu_data(
+                prof,
+                devices,
+                full_range,
+                include_kernels=True,
+                include_nvtx=False,
+            )
             for gpu_entry in prebuilt:
                 print(
                     f"  GPU {gpu_entry['id']}: {len(gpu_entry.get('kernels', []))} kernels, "

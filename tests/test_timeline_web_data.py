@@ -43,3 +43,32 @@ def test_timeline_web_trim_uses_overlap_not_containment(minimal_nsys_db_path):
         payload = json.loads(generate_timeline_data_json(prof, [0], (1_500_000, 1_600_000)))
         assert "gpus" in payload
         assert payload["gpus"][0]["kernels"][0]["name"] == "kernel_A"
+
+
+def test_timeline_web_can_build_kernels_without_nvtx(minimal_nsys_db_path):
+    with Profile(minimal_nsys_db_path) as prof:
+        gpu_data = build_timeline_gpu_data(
+            prof,
+            0,
+            (0, 5_000_000),
+            include_kernels=True,
+            include_nvtx=False,
+        )
+        entry = gpu_data[0]
+        assert len(entry["kernels"]) == 2
+        assert entry["nvtx_spans"] == []
+
+
+def test_timeline_web_can_build_nvtx_without_kernels(minimal_nsys_db_path):
+    with Profile(minimal_nsys_db_path) as prof:
+        gpu_data = build_timeline_gpu_data(
+            prof,
+            0,
+            (0, 5_000_000),
+            include_kernels=False,
+            include_nvtx=True,
+        )
+        entry = gpu_data[0]
+        assert entry["kernels"] == []
+        assert len(entry["nvtx_spans"]) >= 1
+        assert "thread" in entry["nvtx_spans"][0]
