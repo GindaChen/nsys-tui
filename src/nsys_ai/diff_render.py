@@ -93,7 +93,7 @@ def format_diff_terminal(data: ProfileDiffSummary) -> str:
     lines.append("─" * 60)
     if nvtx_reg:
         for n in nvtx_reg:
-            lines.append(f"{_fmt_ns(n.delta_ns):>10}  {n.text}  (count {n.before_count}->{n.after_count})")
+            lines.append(f"{_fmt_delta_ns(n.delta_ns):>10}  {n.text}  (count {n.before_count}->{n.after_count})")
     else:
         lines.append("(none)")
     lines.append("")
@@ -101,7 +101,7 @@ def format_diff_terminal(data: ProfileDiffSummary) -> str:
     lines.append("─" * 60)
     if nvtx_imp:
         for n in nvtx_imp:
-            lines.append(f"{_fmt_ns(n.delta_ns):>10}  {n.text}  (count {n.before_count}->{n.after_count})")
+            lines.append(f"{_fmt_delta_ns(n.delta_ns):>10}  {n.text}  (count {n.before_count}->{n.after_count})")
     else:
         lines.append("(none)")
     lines.append("")
@@ -123,6 +123,15 @@ def format_diff_terminal_multi(
     gl_lines = global_block.splitlines()
     if len(gl_lines) >= 2:
         gl_lines = gl_lines[2:]
+        # Normalize "GPU: None" to "all" when rendering the all-GPU summary.
+        processed: list[str] = []
+        for line in gl_lines:
+            stripped = line.lstrip()
+            if stripped.startswith("GPU:") and "None" in line:
+                processed.append(line.replace("None", "all"))
+            else:
+                processed.append(line)
+        gl_lines = processed
     parts.append(header + "\n".join(gl_lines).rstrip() + "\n")
 
     # 2) Per-GPU overview table
@@ -297,7 +306,20 @@ def format_diff_markdown_multi(
     md.append("")
     md.append("### 3. Global Top Regressions (Kernels)")
     md.append("")
-    md.append(format_diff_markdown(g).split("### Top regressions")[1].strip() if "### Top regressions" in format_diff_markdown(g) else "")
+    global_md = format_diff_markdown(g)
+    marker = "### Top regressions"
+    section = ""
+    if marker in global_md:
+        tail = global_md.split(marker, 1)[1]
+        lines_after = tail.splitlines()
+        body_lines: list[str] = []
+        for line in lines_after[1:]:
+            if line.strip().startswith("### "):
+                break
+            body_lines.append(line)
+        section = "\n".join(body_lines).strip()
+    if section:
+        md.append(section)
 
     # 4) Per-GPU top regressions (short)
     if per_gpu:

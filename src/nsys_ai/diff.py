@@ -107,6 +107,10 @@ def build_profile_summary(
     nvtx_limit: int | None = None,
 ) -> ProfileSummary:
     kernel_rows = prof.meta.kernel_count
+    if gpu is not None:
+        gpu_info = getattr(prof.meta, "gpu_info", None)
+        if gpu_info is not None and gpu in gpu_info:
+            kernel_rows = gpu_info[gpu].kernel_count
     agg = prof.aggregate_kernels(gpu, trim=trim, limit=kernel_limit)
     kernels: list[KernelAgg] = []
     for r in agg:
