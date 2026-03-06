@@ -9,12 +9,15 @@ simple HTML shell.
 from __future__ import annotations
 
 import json
+import os
 from http.server import BaseHTTPRequestHandler
+from urllib.parse import parse_qs, urlparse
 
 from .diff import ProfileDiffSummary, diff_profiles
 from .diff_render import to_diff_json
 from .profile import Profile
-from .web import _ThreadedHTTPServer, _run_server, _ViewerHandler
+from .viewer import build_timeline_gpu_data, generate_timeline_html
+from .web import _TEMPLATE_DIR, _run_server, _ThreadedHTTPServer
 
 
 class _DiffHandler(BaseHTTPRequestHandler):
@@ -34,15 +37,14 @@ class _DiffHandler(BaseHTTPRequestHandler):
         if path == "/api/diff/summary":
             self._handle_summary()
             return
-        
+
         # Iframe timelines
         if path.startswith("/timeline"):
-            from urllib.parse import parse_qs, urlparse
             qs = parse_qs(urlparse(self.path).query)
             side = str(qs.get("side", ["before"])[0]).lower()
             self._serve_timeline_iframe(side)
             return
-        
+
         if path.startswith("/api/timeline/"):
             parts = path.split("/")
             if len(parts) >= 5 and parts[4] == "api":
@@ -71,10 +73,7 @@ class _DiffHandler(BaseHTTPRequestHandler):
         self._serve_html()
 
     def _serve_asset(self, filename: str, content_type: str):
-        import os
-        from .web import _TEMPLATE_DIR
-
-        # We can reuse the timeline assets from the single-profile viewer
+        # Reuse timeline assets from the single-profile viewer
         try:
             path = os.path.join(_TEMPLATE_DIR, filename)
             with open(path, "rb") as f:
@@ -88,7 +87,6 @@ class _DiffHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
-
 
     # ── JSON helpers ──────────────────────────────────────────────
 
@@ -138,33 +136,32 @@ class _DiffHandler(BaseHTTPRequestHandler):
         if not prof:
             self._json_response({"error": "profile not loaded"}, 500)
             return
-        
+
         gpu_filter = self.__class__.gpu
         devices = [gpu_filter] if gpu_filter is not None else getattr(prof.meta, "devices", [])
-        
+
         gpu_infos = []
         for dev in devices:
             info = prof.meta.gpu_info.get(dev)
             label = f"GPU {dev}"
             if info:
-                label += f" - {info.name} ({info.pci_bus}), {info.sm_count} SMs, {info.memory_bytes/1e9:.0f}GB"
+                label += f" - {info.name} ({info.pci_bus}), {info.sm_count} SMs, {info.memory_bytes / 1e9:.0f}GB"
             gpu_infos.append({"id": dev, "label": label})
-        
+
         trim = self.__class__.trim
         t_start, t_end = prof.meta.time_range
         if trim:
             t_start, t_end = trim
-            
-        self._json_response({
-            "time_range_ns": [t_start, t_end],
-            "gpus": gpu_infos,
-            "device_ids": devices,
-        })
+
+        self._json_response(
+            {
+                "time_range_ns": [t_start, t_end],
+                "gpus": gpu_infos,
+                "device_ids": devices,
+            }
+        )
 
     def _handle_timeline_data(self, side: str):
-        from urllib.parse import parse_qs, urlparse
-        import time
-
         qs = parse_qs(urlparse(self.path).query)
         prof = self.__class__.after if side == "after" else self.__class__.before
 
@@ -183,8 +180,6 @@ class _DiffHandler(BaseHTTPRequestHandler):
         end_ns = int(end_s * 1e9)
         devices = [gpu_filter] if gpu_filter is not None else getattr(prof.meta, "devices", [])
 
-        from .viewer import build_timeline_gpu_data
-        
         data = build_timeline_gpu_data(
             prof,
             devices,
@@ -192,7 +187,7 @@ class _DiffHandler(BaseHTTPRequestHandler):
             include_kernels=True,
             include_nvtx=True,
         )
-        
+
         body = json.dumps({"gpus": data}).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -201,20 +196,19 @@ class _DiffHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _serve_timeline_iframe(self, side: str):
-        from .viewer import generate_timeline_html
         prof = self.__class__.after if side == "after" else self.__class__.before
         if not prof:
             self.send_error(404)
             return
-        
+
         gpu_filter = self.__class__.gpu
         devices = [gpu_filter] if gpu_filter is not None else getattr(prof.meta, "devices", [])
-        
+
         html = generate_timeline_html(
-            prof, 
-            devices, 
-            None, # Progressive
-            api_prefix=f"/api/timeline/{side}"
+            prof,
+            devices,
+            None,  # Progressive
+            api_prefix=f"/api/timeline/{side}",
         )
         body = html.encode("utf-8")
         self.send_response(200)
@@ -224,7 +218,6 @@ class _DiffHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     # ── HTML shell ────────────────────────────────────────────────
-
 
     def _serve_html(self):
         html = _DIFF_HTML
@@ -248,7 +241,7 @@ _DIFF_HTML = """<!doctype html>
     <link rel="stylesheet" href="/assets/timeline.css" />
     <style>
       body { font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-             margin: 0; padding: 1.5rem; background: #050816; color: #f5f5f5; 
+             margin: 0; padding: 1.5rem; background: #050816; color: #f5f5f5;
              min-height: 100vh; overflow-y: auto; overflow-x: hidden; }
       h1 { margin-top: 0; font-size: 1.4rem; }
       .paths { font-size: 0.9rem; margin-bottom: 1rem; }
@@ -329,23 +322,23 @@ _DIFF_HTML = """<!doctype html>
         renderSummary(data);
         renderKernels(data);
         renderNvtx(data);
-        
+
         // Setup Sync Logic for the Iframes
         window.addEventListener('message', e => {
             if (e.data && e.data.type === 'T_VIEW_CHANGE') {
                 if (syncIsActive) return;
                 syncIsActive = true;
-                
+
                 const msg = { type: 'T_SET_VIEW', startNs: e.data.startNs, endNs: e.data.endNs };
                 const fb = document.getElementById('frame-before');
                 const fa = document.getElementById('frame-after');
-                
+
                 if (e.source === fb.contentWindow) {
                     fa.contentWindow.postMessage(msg, '*');
                 } else if (e.source === fa.contentWindow) {
                     fb.contentWindow.postMessage(msg, '*');
                 }
-                
+
                 setTimeout(() => { syncIsActive = false; }, 50);
             }
         });
@@ -511,4 +504,3 @@ def serve_diff_web(
 
     open_url = f"http://127.0.0.1:{server.server_address[1]}" if open_browser else None
     _run_server(server, open_url, before)
-

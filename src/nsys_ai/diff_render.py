@@ -12,7 +12,7 @@ from .diff import ProfileDiffSummary
 def _fmt_ns(ns: int) -> str:
     ms = ns / 1e6
     if abs(ms) >= 1000:
-        return f"{ms/1000:.2f}s"
+        return f"{ms / 1000:.2f}s"
     if abs(ms) >= 1:
         return f"{ms:.2f}ms"
     us = ns / 1e3
@@ -31,7 +31,7 @@ def _fmt_delta_ns(ns: int) -> str:
 
 
 def _fmt_pct(x: float) -> str:
-    return f"{x*100:.2f}%"
+    return f"{x * 100:.2f}%"
 
 
 def format_diff_terminal(data: ProfileDiffSummary) -> str:
@@ -51,7 +51,9 @@ def format_diff_terminal(data: ProfileDiffSummary) -> str:
 
     lines.append("Overall")
     lines.append("─" * 60)
-    lines.append(f"Total GPU: {_fmt_ns(data.before.total_gpu_ns)} → {_fmt_ns(data.after.total_gpu_ns)}  (Δ {_fmt_delta_ns(data.after.total_gpu_ns - data.before.total_gpu_ns)})")
+    lines.append(
+        f"Total GPU: {_fmt_ns(data.before.total_gpu_ns)} → {_fmt_ns(data.after.total_gpu_ns)}  (Δ {_fmt_delta_ns(data.after.total_gpu_ns - data.before.total_gpu_ns)})"
+    )
     if data.overlap_delta:
         b = data.overlap_before
         a = data.overlap_after
@@ -62,9 +64,11 @@ def format_diff_terminal(data: ProfileDiffSummary) -> str:
                 sign = "+" if d > 0 else ""
                 lines.append(f"- {k:<15} {b[k]:>9.2f} → {a[k]:>9.2f}  (Δ {sign}{d})")
         if "overlap_pct" in b and "overlap_pct" in a:
-            d = data.overlap_delta.get('overlap_pct', 0)
+            d = data.overlap_delta.get("overlap_pct", 0)
             sign = "+" if d > 0 else ""
-            lines.append(f"- {'overlap_pct':<15} {b['overlap_pct']:>8.1f}% → {a['overlap_pct']:>8.1f}%  (Δ {sign}{d}%)")
+            lines.append(
+                f"- {'overlap_pct':<15} {b['overlap_pct']:>8.1f}% → {a['overlap_pct']:>8.1f}%  (Δ {sign}{d}%)"
+            )
     lines.append("")
 
     def add_kernel_section(title: str, rows):
@@ -75,12 +79,14 @@ def format_diff_terminal(data: ProfileDiffSummary) -> str:
             return
         # Header
         lines.append(f"{'Δ Time':>10}  | {'Count Change':>13} | Kernel")
-        lines.append(f"{'-'*10}--+-{'-'*13}-+-{'-'*30}")
+        lines.append(f"{'-' * 10}--+-{'-' * 13}-+-{'-' * 30}")
         for kd in rows:
             count_str = f"{kd.before_count}->{kd.after_count}"
             lines.append(f"{_fmt_delta_ns(kd.delta_ns):>10}  | {count_str:>13} | {kd.name}")
             # Detail row
-            lines.append(f"{' ':>10}  | {' ':>13} |   before: {_fmt_ns(kd.before_total_ns):>7} ({_fmt_pct(kd.before_share):>6})  after: {_fmt_ns(kd.after_total_ns):>7} ({_fmt_pct(kd.after_share):>6})")
+            lines.append(
+                f"{' ':>10}  | {' ':>13} |   before: {_fmt_ns(kd.before_total_ns):>7} ({_fmt_pct(kd.before_share):>6})  after: {_fmt_ns(kd.after_total_ns):>7} ({_fmt_pct(kd.after_share):>6})"
+            )
         lines.append("")
 
     add_kernel_section("Top regressions (kernels)", data.top_regressions)
@@ -93,7 +99,9 @@ def format_diff_terminal(data: ProfileDiffSummary) -> str:
     lines.append("─" * 60)
     if nvtx_reg:
         for n in nvtx_reg:
-            lines.append(f"{_fmt_delta_ns(n.delta_ns):>10}  {n.text}  (count {n.before_count}->{n.after_count})")
+            lines.append(
+                f"{_fmt_delta_ns(n.delta_ns):>10}  {n.text}  (count {n.before_count}->{n.after_count})"
+            )
     else:
         lines.append("(none)")
     lines.append("")
@@ -101,7 +109,9 @@ def format_diff_terminal(data: ProfileDiffSummary) -> str:
     lines.append("─" * 60)
     if nvtx_imp:
         for n in nvtx_imp:
-            lines.append(f"{_fmt_delta_ns(n.delta_ns):>10}  {n.text}  (count {n.before_count}->{n.after_count})")
+            lines.append(
+                f"{_fmt_delta_ns(n.delta_ns):>10}  {n.text}  (count {n.before_count}->{n.after_count})"
+            )
     else:
         lines.append("(none)")
     lines.append("")
@@ -138,8 +148,10 @@ def format_diff_terminal_multi(
     if per_gpu:
         parts.append("Per-GPU Overview")
         parts.append("─" * 60)
-        parts.append(f"{'GPU':>3} | {'Before Total':>13} | {'After Total':>13} | {'Δ':>10} | {'Overlap % (B→A)':>18}")
-        parts.append(f"{'-'*3}-+-{'-'*13}-+-{'-'*13}-+-{'-'*10}-+-{'-'*18}")
+        parts.append(
+            f"{'GPU':>3} | {'Before Total':>13} | {'After Total':>13} | {'Δ':>10} | {'Overlap % (B→A)':>18}"
+        )
+        parts.append(f"{'-' * 3}-+-{'-' * 13}-+-{'-' * 13}-+-{'-' * 10}-+-{'-' * 18}")
         for dev, summary in sorted(per_gpu.items()):
             b = summary.before
             a = summary.after
@@ -163,7 +175,7 @@ def format_diff_terminal_multi(
         parts.append(f"Top regressions (GPU {dev})")
         parts.append("─" * 60)
         parts.append(f"{'Δ Time':>10}  | {'Count Change':>13} | Kernel")
-        parts.append(f"{'-'*10}--+-{'-'*13}-+-{'-'*30}")
+        parts.append(f"{'-' * 10}--+-{'-' * 13}-+-{'-' * 30}")
         for kd in summary.top_regressions:
             count_str = f"{kd.before_count}->{kd.after_count}"
             parts.append(f"{_fmt_delta_ns(kd.delta_ns):>10}  | {count_str:>13} | {kd.name}")
@@ -189,7 +201,9 @@ def format_diff_markdown(data: ProfileDiffSummary) -> str:
 
     md.append("### Overall")
     md.append("")
-    md.append(f"- **Total GPU**: `{_fmt_ns(data.before.total_gpu_ns)}` → `{_fmt_ns(data.after.total_gpu_ns)}` (Δ `{_fmt_delta_ns(data.after.total_gpu_ns - data.before.total_gpu_ns)}`)")
+    md.append(
+        f"- **Total GPU**: `{_fmt_ns(data.before.total_gpu_ns)}` → `{_fmt_ns(data.after.total_gpu_ns)}` (Δ `{_fmt_delta_ns(data.after.total_gpu_ns - data.before.total_gpu_ns)}`)"
+    )
     if data.overlap_delta:
         b = data.overlap_before
         a = data.overlap_after
@@ -200,9 +214,11 @@ def format_diff_markdown(data: ProfileDiffSummary) -> str:
                 sign = "+" if d > 0 else ""
                 md.append(f"  - `{k}`: `{b[k]}` → `{a[k]}` (Δ `{sign}{d}`)")
         if "overlap_pct" in b and "overlap_pct" in a:
-            d = data.overlap_delta.get('overlap_pct', 0)
+            d = data.overlap_delta.get("overlap_pct", 0)
             sign = "+" if d > 0 else ""
-            md.append(f"  - `overlap_pct`: `{b['overlap_pct']}%` → `{a['overlap_pct']}%` (Δ `{sign}{d}%`)")
+            md.append(
+                f"  - `overlap_pct`: `{b['overlap_pct']}%` → `{a['overlap_pct']}%` (Δ `{sign}{d}%`)"
+            )
     md.append("")
 
     def add_table(title: str, rows, is_regression: bool):
@@ -283,7 +299,9 @@ def format_diff_markdown_multi(
     if per_gpu:
         md.append("### 2. Per-GPU Breakdown (Load Balancing)")
         md.append("")
-        md.append("| GPU | Total Time (Before) | Total Time (After) | Δ | Overlap % (Before → After) |")
+        md.append(
+            "| GPU | Total Time (Before) | Total Time (After) | Δ | Overlap % (Before → After) |"
+        )
         md.append("|---:|---:|---:|---:|---:|")
         for dev, summary in sorted(per_gpu.items()):
             b = summary.before
@@ -411,7 +429,8 @@ def to_diff_json(data: ProfileDiffSummary) -> str:
                 "after_count": n.after_count,
                 "classification": n.classification,
             }
-            for n in data.nvtx_diffs if n.delta_ns > 0
+            for n in data.nvtx_diffs
+            if n.delta_ns > 0
         ][:20],
         "nvtx_improvements": [
             {
@@ -423,7 +442,8 @@ def to_diff_json(data: ProfileDiffSummary) -> str:
                 "after_count": n.after_count,
                 "classification": n.classification,
             }
-            for n in data.nvtx_diffs if n.delta_ns < 0
+            for n in data.nvtx_diffs
+            if n.delta_ns < 0
         ][:20],
         "overlap": {
             "before": data.overlap_before,
@@ -432,4 +452,3 @@ def to_diff_json(data: ProfileDiffSummary) -> str:
         },
     }
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
-

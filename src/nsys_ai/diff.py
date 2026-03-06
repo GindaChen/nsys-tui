@@ -153,9 +153,16 @@ def build_profile_summary(
         overlap = overlap_analysis(prof, gpu, trim=trim)
     else:
         # Node-wide aggregation: sum up individual GPU overlap stats.
-        overlap = {"compute_only_ms": 0.0, "nccl_only_ms": 0.0, "overlap_ms": 0.0,
-                   "idle_ms": 0.0, "total_ms": 0.0, "overlap_pct": 0.0,
-                   "compute_kernels": 0, "nccl_kernels": 0}
+        overlap = {
+            "compute_only_ms": 0.0,
+            "nccl_only_ms": 0.0,
+            "overlap_ms": 0.0,
+            "idle_ms": 0.0,
+            "total_ms": 0.0,
+            "overlap_pct": 0.0,
+            "compute_kernels": 0,
+            "nccl_kernels": 0,
+        }
         devices = prof.meta.devices if prof.meta.devices else []
         for dev in devices:
             dev_stats = overlap_analysis(prof, dev, trim=trim)
@@ -192,7 +199,11 @@ def build_profile_summary(
 
 def collect_sanity_warnings(before: ProfileSummary, after: ProfileSummary) -> list[str]:
     warnings: list[str] = []
-    if before.schema_version and after.schema_version and before.schema_version != after.schema_version:
+    if (
+        before.schema_version
+        and after.schema_version
+        and before.schema_version != after.schema_version
+    ):
         warnings.append(
             f"Nsight schema/version differs: before='{before.schema_version}' after='{after.schema_version}'."
         )
@@ -200,7 +211,9 @@ def collect_sanity_warnings(before: ProfileSummary, after: ProfileSummary) -> li
         warnings.append("Different GPU IDs selected between before/after (unexpected).")
     if before.kernel_rows and after.kernel_rows:
         # Very rough signal for "not comparable"
-        ratio = max(before.kernel_rows, after.kernel_rows) / max(1, min(before.kernel_rows, after.kernel_rows))
+        ratio = max(before.kernel_rows, after.kernel_rows) / max(
+            1, min(before.kernel_rows, after.kernel_rows)
+        )
         if ratio >= 3.0:
             warnings.append(
                 f"Kernel row counts differ a lot (before={before.kernel_rows}, after={after.kernel_rows}); compare may be dominated by workload differences."
@@ -317,7 +330,11 @@ def diff_profiles(
     def sort_key(kd: KernelDiff):
         if sort == "percent":
             base = kd.before_total_ns
-            return (kd.delta_ns / base) if base else (float("inf") if kd.delta_ns > 0 else float("-inf"))
+            return (
+                (kd.delta_ns / base)
+                if base
+                else (float("inf") if kd.delta_ns > 0 else float("-inf"))
+            )
         if sort == "total":
             return kd.after_total_ns
         # default: delta
@@ -331,10 +348,19 @@ def diff_profiles(
     overlap_before = before.overlap
     overlap_after = after.overlap
     overlap_delta = {}
-    for key in ("compute_only_ms", "nccl_only_ms", "overlap_ms", "idle_ms", "total_ms", "overlap_pct"):
+    for key in (
+        "compute_only_ms",
+        "nccl_only_ms",
+        "overlap_ms",
+        "idle_ms",
+        "total_ms",
+        "overlap_pct",
+    ):
         if key in overlap_before and key in overlap_after:
             try:
-                overlap_delta[key] = round(float(overlap_after[key]) - float(overlap_before[key]), 3)
+                overlap_delta[key] = round(
+                    float(overlap_after[key]) - float(overlap_before[key]), 3
+                )
             except Exception:
                 pass
 
@@ -350,4 +376,3 @@ def diff_profiles(
         top_regressions=regressions[: max(0, int(limit))],
         top_improvements=improvements[: max(0, int(limit))],
     )
-
