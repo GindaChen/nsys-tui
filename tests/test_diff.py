@@ -18,9 +18,7 @@ def _make_profile(path: str, *, kernels: list[tuple], nvtx: list[tuple] | None =
         "start INT, [end] INT, deviceId INT, streamId INT, correlationId INT, "
         "shortName INT, demangledName INT)"
     )
-    conn.execute(
-        "CREATE TABLE NVTX_EVENTS(text TEXT, globalTid INT, start INT, [end] INT)"
-    )
+    conn.execute("CREATE TABLE NVTX_EVENTS(text TEXT, globalTid INT, start INT, [end] INT)")
 
     # StringIds
     strings = {
@@ -152,4 +150,3 @@ def test_diff_cli_json_output(tmp_path):
     assert payload["before"]["total_gpu_ns"] == 10
     assert payload["after"]["total_gpu_ns"] == 20
     assert payload["top_regressions"][0]["delta_ns"] == 10
-

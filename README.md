@@ -292,6 +292,9 @@ Compare two profiles side-by-side — spot regressions and improvements from a s
 # Compare before and after a code change
 nsys-ai diff before.sqlite after.sqlite
 
+# Open interactive side-by-side web comparison
+nsys-ai diff-web before.sqlite after.sqlite
+
 # Focus on a specific GPU
 nsys-ai diff before.sqlite after.sqlite --gpu 0
 
@@ -338,7 +341,8 @@ Options:
 | `nccl` | NCCL collective breakdown by type |
 | `iters` | Auto-detect training iterations |
 | `tree` | NVTX hierarchy as text |
-| `diff` | **Before/after profile comparison** |
+| `diff` | **Before/after profile comparison (CLI)** |
+| `diff-web` | **Side-by-side comparison web viewer** |
 | `tui` | **Interactive tree TUI** |
 | `timeline` | **Interactive timeline TUI** |
 | `timeline-web` | **Web-based multi-GPU timeline** (progressive rendering) |

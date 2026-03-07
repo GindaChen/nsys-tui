@@ -250,6 +250,7 @@ def generate_timeline_html(
     *,
     timeline_css_href: str = "/assets/timeline.css",
     timeline_js_src: str = "/assets/timeline.js",
+    api_prefix: str = "",
 ) -> str:
     """Generate a standalone HTML page with the horizontal timeline viewer.
 
@@ -299,6 +300,7 @@ def generate_timeline_html(
         PROGRESSIVE=progressive,
         TIMELINE_CSS_HREF=timeline_css_href,
         TIMELINE_JS_SRC=timeline_js_src,
+        API_PREFIX=api_prefix,
     )
 
 

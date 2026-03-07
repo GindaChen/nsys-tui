@@ -209,6 +209,21 @@ def _cmd_diff(args, _profile):
         print(out, end="")
 
 
+def _cmd_diff_web(args, _profile):
+    from nsys_ai.diff_web import serve_diff_web
+
+    trim = _parse_trim(args)
+    with _profile.open(args.before) as before, _profile.open(args.after) as after:
+        serve_diff_web(
+            before,
+            after,
+            gpu=args.gpu,
+            trim=trim,
+            port=args.port,
+            open_browser=not args.no_browser,
+        )
+
+
 def _cmd_summary(args, _profile):
     from nsys_ai.summary import auto_commentary, format_text, gpu_summary
 
@@ -480,7 +495,7 @@ def _build_parser():
     )
     sub = parser.add_subparsers(
         dest="command",
-        metavar="{open,web,timeline-web,chat,ask,report,diff,export,help}",
+        metavar="{open,web,timeline-web,chat,ask,report,diff,diff-web,export,help}",
     )
 
     # Public commands (simplified)
@@ -537,6 +552,16 @@ def _build_parser():
                    help="Sort mode for top changes (default: delta)")
     p.add_argument("--no-ai", action="store_true", help="No-op v1 flag (reserved for AI narrative)")
     p.set_defaults(handler=_cmd_diff)
+
+    p = sub.add_parser("diff-web", help="Serve web diff viewer for two profiles")
+    p.add_argument("before", help="Path to baseline profile (.sqlite or .nsys-rep)")
+    p.add_argument("after", help="Path to candidate profile (.sqlite or .nsys-rep)")
+    p.add_argument("--gpu", type=int, default=None, help="GPU device ID (default: all GPUs)")
+    p.add_argument("--trim", nargs=2, type=float, required=False, metavar=("START_S", "END_S"),
+                   help="Time window in seconds (apply to both profiles)")
+    p.add_argument("--port", type=int, default=8145, help="HTTP port (default: 8145)")
+    p.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
+    p.set_defaults(handler=_cmd_diff_web)
 
     p = sub.add_parser("export", help="Export Perfetto JSON traces")
     _add_gpu_trim(p, gpu_required=False)
