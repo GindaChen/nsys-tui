@@ -14,7 +14,7 @@ Tool catalog:
   - get_iteration_diff: macro diff for one iteration (Stage 2)
   - get_region_diff: micro diff for a code region (Stage 3)
   - summarize_nvtx_subtree, get_launch_config_diff, get_source_code_context,
-  - get_gpu_imbalance_stats, get_global_diff, get_memory_profile_diff, compute_mfu (pure; call twice for compare)
+  - get_gpu_imbalance_stats, get_global_diff, get_memory_profile_diff, get_gpu_peak_tflops, compute_mfu (pure; call twice for compare)
 """
 
 from __future__ import annotations
