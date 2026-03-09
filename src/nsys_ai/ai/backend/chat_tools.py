@@ -37,6 +37,54 @@ TOOL_COMPUTE_MFU = {
     },
 }
 
+# Region-level MFU tool: compute MFU for a specific NVTX region inside the profile.
+# The backend injects the current profile_path; the model MUST NOT pass a profile_path argument.
+TOOL_COMPUTE_REGION_MFU = {
+    "type": "function",
+    "function": {
+        "name": "compute_region_mfu",
+        "description": (
+            "Compute MFU (Model FLOPs Utilization) for a specific NVTX region inside the current profile. "
+            "Use this when the user asks for MFU of a named block like 'Forward Pass' or 'FlashAttention'. "
+            "The tool automatically finds the NVTX range, attributes kernels via CUPTI_ACTIVITY_KIND_RUNTIME, "
+            "and computes both wall-time and GPU-active-time MFU. Do NOT pass a profile_path argument."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "nvtx_name": {
+                    "type": "string",
+                    "description": "NVTX name substring to match (e.g. 'Forward Pass', 'FlashAttention').",
+                },
+                "theoretical_flops": {
+                    "type": "number",
+                    "description": "Theoretical model FLOPs for this region (e.g. model_flops_per_step for the step).",
+                },
+                "peak_tflops": {
+                    "type": "number",
+                    "description": "Optional GPU peak TFLOPS (BF16/FP16). If omitted, the tool will infer it from the profile GPU.",
+                },
+                "occurrence_index": {
+                    "type": "integer",
+                    "description": "Which matching NVTX occurrence to use (1-based). Default is 1.",
+                    "default": 1,
+                },
+                "device_id": {
+                    "type": "integer",
+                    "description": "Optional CUDA deviceId to restrict kernels to a single GPU. If omitted, all devices are considered.",
+                },
+                "match_mode": {
+                    "type": "string",
+                    "description": "How to match nvtx_name against NVTX text. 'contains' uses a substring match; 'exact' requires full equality.",
+                    "enum": ["contains", "exact"],
+                    "default": "contains",
+                },
+            },
+            "required": ["nvtx_name", "theoretical_flops"],
+        },
+    },
+}
+
 # Get peak TFLOPS from profile GPU name (BF16/FP16). Call before compute_mfu so you only ask user for model_flops_per_step.
 TOOL_GET_GPU_PEAK_TFLOPS = {
     "type": "function",
@@ -56,7 +104,7 @@ TOOL_GET_GPU_PEAK_TFLOPS = {
 # ---------------------------------------------------------------------------
 
 def _tools_openai() -> list[dict]:
-    """Return the OpenAI-style tool list: navigate, zoom, query_profile_db, get_gpu_peak_tflops, compute_mfu."""
+    """Return the OpenAI-style tool list for single-profile chat."""
     return [
         {
             "type": "function",
@@ -132,6 +180,7 @@ def _tools_openai() -> list[dict]:
         TOOL_QUERY_PROFILE_DB,
         TOOL_GET_GPU_PEAK_TFLOPS,
         TOOL_COMPUTE_MFU,
+        TOOL_COMPUTE_REGION_MFU,
     ]
 
 
@@ -195,7 +244,16 @@ def _build_system_prompt(
         "   - Do NOT output code blocks or JSON for navigation - use the actual tool call mechanism only.\n"
         "5. If a requested kernel is not in the context, politely say it is not visible or "
         "does not exist.\n"
-        "6. For MFU: (1) Call get_gpu_peak_tflops to get peak_tflops from the profile GPU. (2) Use query_profile_db to get step_time_s (e.g. (MAX([end])-MIN(start))/1e9). (3) Ask the user for model_flops_per_step (nsys does not store it). Do NOT call compute_mfu until the user has provided it — after asking, end your response and wait for their reply; only then call compute_mfu with that value. (4) If get_gpu_peak_tflops returns an error, ask the user for peak_tflops as well."
+        "6. For whole-step MFU: (1) Call get_gpu_peak_tflops to get peak_tflops from the profile GPU. "
+        "   (2) Use query_profile_db to get step_time_s (e.g. (MAX([end])-MIN(start))/1e9). "
+        "   (3) Ask the user for model_flops_per_step (nsys does not store it). Do NOT call compute_mfu until the user "
+        "has provided it — after asking, end your response and wait for their reply; only then call compute_mfu with that value. "
+        "If get_gpu_peak_tflops returns an error, ask the user for peak_tflops as well.\n"
+        "7. For MFU of a specific NVTX region (e.g. 'Forward Pass', 'FlashAttention'): "
+        "   call compute_region_mfu instead of writing SQL yourself. Provide nvtx_name, theoretical_flops, and optional "
+        "peak_tflops / occurrence_index / device_id. The backend will: (a) find the matching NVTX range, "
+        " (b) attribute kernels using CUPTI_ACTIVITY_KIND_RUNTIME, and (c) compute both wall-time and GPU-active-time MFU. "
+        "Use its structured result to explain how effective that region is."
     )
 
 

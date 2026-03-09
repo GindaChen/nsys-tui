@@ -46,6 +46,7 @@ from .diff_tools import (
 from .hardware import get_peak_tflops
 from .mfu import compute_mfu_from_args
 from .profile import get_first_gpu_name
+from .region_mfu import compute_region_mfu_from_conn
 
 _log = logging.getLogger(__name__)
 _telemetry_log = logging.getLogger("nsys_ai.telemetry")
@@ -440,6 +441,7 @@ def stream_agent_loop(
     tools = tools if tools is not None else (TOOLS_DIFF_OPENAI if use_diff else _tools_openai())
     conn = None
     query_runner = None
+    sqlite_path: str | None = None
 
     if use_diff:
         system_prompt = build_diff_system_prompt(
@@ -638,6 +640,45 @@ def stream_agent_loop(
                     except json.JSONDecodeError:
                         args = {}
                     result = compute_mfu_from_args(args)
+                    api_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tid,
+                        "name": name,
+                        "content": json.dumps(result),
+                    })
+                    continue
+                if name == "compute_region_mfu":
+                    yield {"type": "system", "content": "Running compute_region_mfu..."}
+                    if conn is None or sqlite_path is None:
+                        result = {
+                            "error": {
+                                "code": "PROFILE_NOT_LOADED",
+                                "message": "No profile loaded; cannot compute region MFU.",
+                            }
+                        }
+                    else:
+                        try:
+                            args = json.loads(args_str) if args_str.strip() else {}
+                        except json.JSONDecodeError:
+                            args = {}
+                        result = compute_region_mfu_from_conn(
+                            conn,
+                            sqlite_path,
+                            args.get("nvtx_name") or "",
+                            float(args.get("theoretical_flops") or 0.0),
+                            peak_tflops=(
+                                float(args["peak_tflops"])
+                                if "peak_tflops" in args and args["peak_tflops"] is not None
+                                else None
+                            ),
+                            occurrence_index=int(args.get("occurrence_index") or 1),
+                            device_id=(
+                                int(args["device_id"])
+                                if "device_id" in args and args["device_id"] is not None
+                                else None
+                            ),
+                            match_mode=str(args.get("match_mode") or "contains"),
+                        )
                     api_messages.append({
                         "role": "tool",
                         "tool_call_id": tid,
