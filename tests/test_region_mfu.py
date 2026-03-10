@@ -3,6 +3,7 @@ import sqlite3
 from nsys_ai.region_mfu import (
     compute_mfu_metrics_for_region,
     compute_region_mfu_from_conn,
+    compute_theoretical_flops,
     find_nvtx_ranges,
     get_region_kernels,
     select_nvtx_occurrence,
@@ -276,3 +277,52 @@ def test_compute_region_mfu_kernel_mode(tmp_path):
         assert "mfu_pct_kernel_union" in result
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# compute_theoretical_flops tests
+# ---------------------------------------------------------------------------
+
+
+def test_compute_theoretical_flops_attention():
+    """Flash attention FLOPs: 4 * S^2 * H * L."""
+    result = compute_theoretical_flops(
+        "attention", hidden_dim=4096, seq_len=131072, num_layers=32
+    )
+    assert "error" not in result
+    # 4 * 131072^2 * 4096 = 2.81474976e14 per layer, * 32 = 9.00719924e15
+    expected = 4 * 131072 * 131072 * 4096 * 32
+    assert result["theoretical_flops"] == expected
+    assert result["operation"] == "attention"
+    assert "formula" in result
+
+
+def test_compute_theoretical_flops_full_layer():
+    """Full layer = attention + qkv_proj + output_proj + mlp."""
+    result = compute_theoretical_flops(
+        "full_layer", hidden_dim=4096, seq_len=1024, num_layers=1
+    )
+    assert "error" not in result
+    H, S = 4096, 1024
+    ffn = 4 * H  # default
+    expected = (4 * S * S * H) + (6 * S * H * H) + (2 * S * H * H) + (4 * S * H * ffn)
+    assert result["theoretical_flops"] == expected
+
+
+def test_compute_theoretical_flops_linear():
+    """Generic linear: 2 * M * N * K."""
+    result = compute_theoretical_flops("linear", M=1024, N=2048, K=4096)
+    assert "error" not in result
+    assert result["theoretical_flops"] == 2 * 1024 * 2048 * 4096
+
+
+def test_compute_theoretical_flops_invalid_operation():
+    result = compute_theoretical_flops("invalid_op")
+    assert "error" in result
+    assert result["error"]["code"] == "INVALID_ARGUMENT"
+
+
+def test_compute_theoretical_flops_missing_dims():
+    result = compute_theoretical_flops("attention", hidden_dim=0, seq_len=0)
+    assert "error" in result
+    assert result["error"]["code"] == "INVALID_ARGUMENT"

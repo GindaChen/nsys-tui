@@ -47,7 +47,7 @@ from .diff_tools import (
 from .hardware import get_peak_tflops
 from .mfu import compute_mfu_from_args
 from .profile import get_first_gpu_name
-from .region_mfu import compute_region_mfu_from_conn
+from .region_mfu import compute_region_mfu_from_conn, compute_theoretical_flops
 
 _log = logging.getLogger(__name__)
 _telemetry_log = logging.getLogger("nsys_ai.telemetry")
@@ -259,7 +259,7 @@ def run_agent_loop(
                 )
             else:
                 # Tools only implemented in the streaming path get an explicit message
-                if name in {"get_gpu_peak_tflops", "compute_mfu", "compute_region_mfu"}:
+                if name in {"get_gpu_peak_tflops", "compute_mfu", "compute_region_mfu", "compute_theoretical_flops"}:
                     tool_result = (
                         f"Tool '{name}' is only supported in the streaming API path "
                         "and cannot be executed in this non-streaming request."
@@ -692,6 +692,37 @@ def stream_agent_loop(
                     except json.JSONDecodeError:
                         args = {}
                     result = compute_mfu_from_args(args)
+                    api_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tid,
+                            "name": name,
+                            "content": json.dumps(result),
+                        }
+                    )
+                    continue
+                if name == "compute_theoretical_flops":
+                    yield {"type": "system", "content": "Computing theoretical FLOPs..."}
+                    try:
+                        args = json.loads(args_str) if args_str.strip() else {}
+                    except json.JSONDecodeError:
+                        args = {}
+                    op = str(args.get("operation") or "")
+                    if not op:
+                        result = {"error": {"code": "MISSING_PARAMETER", "message": "operation is required."}}
+                    else:
+                        result = compute_theoretical_flops(
+                            op,
+                            hidden_dim=int(args.get("hidden_dim") or 0),
+                            seq_len=int(args.get("seq_len") or 0),
+                            num_layers=int(args.get("num_layers") or 1),
+                            ffn_dim=int(args["ffn_dim"]) if args.get("ffn_dim") is not None else None,
+                            batch_size=int(args.get("batch_size") or 1),
+                            multiplier=int(args.get("multiplier") or 1),
+                            M=int(args.get("M") or 0),
+                            N=int(args.get("N") or 0),
+                            K=int(args.get("K") or 0),
+                        )
                     api_messages.append(
                         {
                             "role": "tool",

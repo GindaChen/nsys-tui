@@ -107,6 +107,77 @@ TOOL_COMPUTE_REGION_MFU = {
     },
 }
 
+# Theoretical FLOPs calculator — does exact arithmetic so the LLM doesn't have to.
+TOOL_COMPUTE_THEORETICAL_FLOPS = {
+    "type": "function",
+    "function": {
+        "name": "compute_theoretical_flops",
+        "description": (
+            "Compute theoretical FLOPs for transformer operations using EXACT arithmetic. "
+            "ALWAYS call this BEFORE compute_region_mfu — do NOT compute FLOPs yourself. "
+            "IMPORTANT: set num_layers to the model's layer count (e.g. 32 for LLaMA-7B) "
+            "to get total FLOPs across all layers. "
+            "Pass the returned theoretical_flops value directly to compute_region_mfu."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "description": (
+                        "Operation type: "
+                        "'attention' (QK^T+softmax*V: 4*S²*H), "
+                        "'qkv_proj' (Q/K/V linear: 6*S*H²), "
+                        "'output_proj' (out linear: 2*S*H²), "
+                        "'mlp' (FFN up+down: 4*S*H*ffn), "
+                        "'full_layer' (attn+proj+mlp combined), "
+                        "'full_model' (same as full_layer), "
+                        "'linear' (generic: 2*M*N*K)."
+                    ),
+                    "enum": [
+                        "attention", "qkv_proj", "output_proj",
+                        "mlp", "full_layer", "full_model", "linear",
+                    ],
+                },
+                "hidden_dim": {
+                    "type": "integer",
+                    "description": "Model hidden dimension (H). Required for all operations except 'linear'.",
+                },
+                "seq_len": {
+                    "type": "integer",
+                    "description": "Sequence length (S). Required for all operations except 'linear'.",
+                },
+                "num_layers": {
+                    "type": "integer",
+                    "description": (
+                        "Number of transformer layers (L). MUST match the model's actual layer count "
+                        "(e.g. 32 for LLaMA-7B, 80 for LLaMA-70B). Per-layer FLOPs are multiplied by this."
+                    ),
+                    "default": 1,
+                },
+                "ffn_dim": {
+                    "type": "integer",
+                    "description": "FFN intermediate dimension. Defaults to 4*hidden_dim if omitted.",
+                },
+                "batch_size": {
+                    "type": "integer",
+                    "description": "Batch size. Default 1.",
+                    "default": 1,
+                },
+                "multiplier": {
+                    "type": "integer",
+                    "description": "1=forward only, 3=fwd+bwd (no ckpt), 4=fwd+bwd+recompute. Default 1.",
+                    "default": 1,
+                },
+                "M": {"type": "integer", "description": "For 'linear' only: first dimension."},
+                "N": {"type": "integer", "description": "For 'linear' only: second dimension."},
+                "K": {"type": "integer", "description": "For 'linear' only: third dimension."},
+            },
+            "required": ["operation"],
+        },
+    },
+}
+
 # Get peak TFLOPS from profile GPU name (BF16/FP16). Call before compute_mfu so you only ask user for model_flops_per_step.
 TOOL_GET_GPU_PEAK_TFLOPS = {
     "type": "function",
@@ -204,6 +275,7 @@ def _tools_openai() -> list[dict]:
         TOOL_GET_GPU_PEAK_TFLOPS,
         TOOL_COMPUTE_MFU,
         TOOL_COMPUTE_REGION_MFU,
+        TOOL_COMPUTE_THEORETICAL_FLOPS,
     ]
 
 
@@ -278,29 +350,48 @@ def _build_system_prompt(
         "   - For NVTX ranges (e.g. 'Forward Pass'): set source='nvtx', name=<nvtx_text>. "
         "   - For kernels (e.g. 'flash_fwd_kernel'): set source='kernel', name=<kernel_name>. "
         "   The tool handles both modes. Provide theoretical_flops and optional peak_tflops / num_gpus.\n"
-        "   IMPORTANT: To compute theoretical_flops, ask the user for model parameters and use the formulas below.\n"
+        "   KERNEL NAME TIPS: The name parameter uses substring matching (LIKE '%%name%%').\n"
+        "   - Use SHORT technical names: 'flash' (not 'flash attention kernel'), 'gemm', 'nccl'.\n"
+        "   - If KERNEL_NOT_FOUND, retry with a shorter/broader keyword.\n"
+        "   - When unsure of exact name, use query_profile_db first to discover kernel names:\n"
+        "     SELECT DISTINCT s.value FROM StringIds s JOIN CUPTI_ACTIVITY_KIND_KERNEL k ON k.shortName=s.id WHERE s.value LIKE '%%flash%%'\n"
+        "   IMPORTANT: Use compute_theoretical_flops to compute FLOPs — do NOT compute manually.\n"
+        "   Workflow: (1) compute_theoretical_flops → get exact FLOPs, (2) compute_region_mfu with that value.\n"
         "\n"
-        "=== MFU REFERENCE FORMULAS ===\n"
-        "Use these formulas to compute theoretical_flops BEFORE calling compute_mfu or compute_region_mfu.\n"
-        "The nsys profile does NOT store model FLOPs — you must calculate them from model architecture.\n\n"
-        "## Transformer Per-Layer FLOPs (forward pass, per token sequence)\n"
-        "  Variables: H=hidden_dim, S=seq_len, C=context_len (cross-attn), ffn=ffn_dim\n"
-        "  - QKV + output projection:  8 * H * H * S\n"
-        "  - Cross-attn projections:   4 * H * H * S + 4 * H * H * C  (skip if no cross-attn)\n"
-        "  - MLP (up + down):          4 * H * ffn * S\n"
-        "  - Self-attn matmuls (QK^T + AV): 4 * S * S * H\n"
-        "  - Cross-attn matmuls:       4 * S * C * H  (skip if no cross-attn)\n"
-        "  flops_per_layer = sum of above\n\n"
-        "## Quick Estimate (standard Transformer)\n"
-        "  flops_per_step ≈ 6 * N_params * tokens_per_step  (forward + backward)\n\n"
-        "## Full Step FLOPs\n"
-        "  theoretical_flops = batch_size * flops_per_layer * num_layers * multiplier * grad_accum_steps\n"
-        "  - multiplier = 3 (no activation checkpointing: 1 fwd + 2 bwd)\n"
-        "  - multiplier = 4 (full activation checkpointing: 1 fwd + 1 recompute + 2 bwd)\n\n"
-        "## Multi-GPU\n"
-        "  When using data parallelism, pass num_gpus=world_size to compute_region_mfu.\n"
-        "  The tool will scale peak_tflops by num_gpus automatically.\n"
-        "  Ask the user for num_gpus if the profile uses multiple GPUs.\n"
+        "=== MFU REFERENCE (for choosing the right operation in compute_theoretical_flops) ===\n"
+        "The nsys profile does NOT store model FLOPs — you must calculate them from model architecture.\n"
+        "CRITICAL: theoretical_flops must match ONLY the computation the target kernel/region performs.\n\n"
+        "## 1. CORE PRINCIPLE — Match FLOPs to the Kernel\n"
+        "  If the user asks for the MFU of a SPECIFIC kernel, compute ONLY the FLOPs that kernel does.\n"
+        "  Do NOT use the full-model FLOPs for a single kernel's MFU.\n"
+        "  Example: flash_fwd_kernel only does attention matmuls (QK^T + softmax*V),\n"
+        "    so use 4*S*S*H per layer — NOT the full transformer layer FLOPs.\n\n"
+        "## 2. Common Kernel → FLOPs Mapping (per layer, forward only)\n"
+        "  Variables: H=hidden_dim, S=seq_len, L=num_layers, ffn=ffn_dim, head_dim=H/num_heads\n"
+        "  | Kernel type                     | What it computes        | FLOPs per layer         |\n"
+        "  |--------------------------------|-------------------------|-------------------------|\n"
+        "  | Attention matmul (flash_fwd)   | QK^T + softmax*V        | 4 * S * S * H           |\n"
+        "  | GEMM / linear projection       | Matrix multiply W*x     | 2 * M * N * K           |\n"
+        "  | QKV projection                 | Linear proj for Q,K,V   | 6 * S * H * H           |\n"
+        "  | Output projection              | Linear proj after attn  | 2 * S * H * H           |\n"
+        "  | MLP / FFN                      | Up + down projection    | 4 * S * H * ffn         |\n"
+        "  Total for all layers: multiply per-layer by L.\n"
+        "  For fwd+bwd: multiply by 3 (no checkpointing) or 4 (with checkpointing).\n\n"
+        "## 3. Full Model FLOPs (use for whole-step or NVTX-wrapped regions)\n"
+        "  Transformer per-layer FLOPs (forward, batch=1):\n"
+        "    flops_per_layer = 8*H*H*S + 4*H*ffn*S + 4*S*S*H  (self-attn + MLP)\n"
+        "  Full step:\n"
+        "    theoretical_flops = batch_size * flops_per_layer * L * multiplier * grad_accum\n"
+        "  Quick estimate: flops_per_step ≈ 6 * N_params * tokens_per_step (fwd+bwd)\n\n"
+        "## 4. Multi-GPU\n"
+        "  Pass num_gpus=world_size to compute_region_mfu. Peak is scaled automatically.\n\n"
+        "## 5. SANITY CHECK (MANDATORY)\n"
+        "  After computing MFU, check the result:\n"
+        "  - MFU > 100%  → theoretical_flops is TOO HIGH. You likely used full-model FLOPs\n"
+        "                   for a single kernel. Recalculate with only that kernel's FLOPs.\n"
+        "  - MFU < 0.1%  → theoretical_flops may be TOO LOW, or the kernel barely ran.\n"
+        "  - MFU 10-80%  → typical reasonable range for compute-bound kernels.\n"
+        "  If MFU > 100%, do NOT report it as-is. Recompute with correct FLOPs and explain.\n"
         "=============================\n"
     )
 

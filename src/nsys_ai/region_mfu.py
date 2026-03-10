@@ -50,6 +50,116 @@ def _error(code: str, message: str) -> ErrorDict:
     return {"error": {"code": code, "message": message}}
 
 
+# ---------------------------------------------------------------------------
+# Theoretical FLOPs calculator — reliable arithmetic for the LLM agent
+# ---------------------------------------------------------------------------
+
+_VALID_OPERATIONS = {
+    "attention",      # QK^T + softmax*V: 4 * S^2 * H
+    "qkv_proj",       # Q/K/V linear projections: 6 * S * H^2
+    "output_proj",    # Output projection: 2 * S * H^2
+    "mlp",            # MLP/FFN up + down: 4 * S * H * ffn
+    "full_layer",     # attention + qkv_proj + output_proj + mlp
+    "full_model",     # full_layer * num_layers (alias for convenience)
+    "linear",         # Generic: 2 * M * N * K
+}
+
+
+def compute_theoretical_flops(
+    operation: str,
+    *,
+    hidden_dim: int = 0,
+    seq_len: int = 0,
+    num_layers: int = 1,
+    ffn_dim: int | None = None,
+    batch_size: int = 1,
+    multiplier: int = 1,
+    # For "linear" operation only:
+    M: int = 0,
+    N: int = 0,
+    K: int = 0,
+) -> RowDict | ErrorDict:
+    """Compute theoretical FLOPs for transformer operations.
+
+    This tool exists because LLMs cannot reliably multiply large numbers
+    like ``131072² × 4096 × 32``.  The agent selects the operation and
+    provides model parameters; Python does the exact arithmetic.
+
+    Args:
+        operation: One of ``attention``, ``qkv_proj``, ``output_proj``,
+            ``mlp``, ``full_layer``, ``full_model``, ``linear``.
+        hidden_dim (H): Model hidden dimension.
+        seq_len (S): Sequence length.
+        num_layers (L): Number of transformer layers. Applied to per-layer
+            operations automatically.
+        ffn_dim: FFN intermediate dimension. Defaults to ``4 * hidden_dim``.
+        batch_size: Batch size. Default 1.
+        multiplier: 1 = forward only, 3 = fwd+bwd (no ckpt),
+            4 = fwd+bwd with activation checkpointing.
+        M, N, K: Dimensions for generic ``linear`` (2*M*N*K).
+
+    Returns:
+        Dict with ``theoretical_flops``, ``formula``, and ``breakdown``.
+    """
+    op = operation.lower().strip()
+    if op not in _VALID_OPERATIONS:
+        return _error(
+            "INVALID_ARGUMENT",
+            f"operation must be one of {sorted(_VALID_OPERATIONS)}, got '{operation}'.",
+        )
+
+    H = int(hidden_dim)
+    S = int(seq_len)
+    L = max(1, int(num_layers))
+    B = max(1, int(batch_size))
+    mul = max(1, int(multiplier))
+    ffn = int(ffn_dim) if ffn_dim is not None else 4 * H
+
+    if op == "linear":
+        Mi, Ni, Ki = int(M), int(N), int(K)
+        if Mi <= 0 or Ni <= 0 or Ki <= 0:
+            return _error("INVALID_ARGUMENT", "M, N, K must all be positive for 'linear'.")
+        flops = 2 * Mi * Ni * Ki
+        formula = f"2 * {Mi} * {Ni} * {Ki}"
+        breakdown = {"per_op": flops}
+        total = flops * B * mul
+        formula_full = f"{formula} * batch({B}) * mul({mul})"
+    else:
+        if H <= 0 or S <= 0:
+            return _error("INVALID_ARGUMENT", "hidden_dim and seq_len must be positive.")
+
+        components: dict[str, int] = {}
+        if op in ("attention", "full_layer", "full_model"):
+            components["attention"] = 4 * S * S * H
+        if op in ("qkv_proj", "full_layer", "full_model"):
+            components["qkv_proj"] = 6 * S * H * H
+        if op in ("output_proj", "full_layer", "full_model"):
+            components["output_proj"] = 2 * S * H * H
+        if op in ("mlp", "full_layer", "full_model"):
+            components["mlp"] = 4 * S * H * ffn
+
+        per_layer = sum(components.values())
+        total = per_layer * L * B * mul
+        breakdown = {
+            "per_layer_flops": per_layer,
+            "components": {k: v for k, v in components.items()},
+            "num_layers": L,
+            "batch_size": B,
+            "multiplier": mul,
+        }
+        parts = " + ".join(f"{k}={v:.4e}" for k, v in components.items())
+        formula = f"({parts}) * L({L}) * batch({B}) * mul({mul})"
+        formula_full = formula
+
+    return {
+        "theoretical_flops": total,
+        "theoretical_flops_str": f"{total:.6e}",
+        "operation": op,
+        "formula": formula_full,
+        "breakdown": breakdown,
+    }
+
+
 def _detect_nvtx_text_id(conn: sqlite3.Connection) -> bool:
     """Return True if NVTX_EVENTS uses textId -> StringIds."""
     try:
@@ -132,6 +242,56 @@ def find_nvtx_ranges(
     return rows
 
 
+def _resolve_string_ids(
+    conn: sqlite3.Connection,
+    pattern: str,
+    *,
+    match_mode: str = "contains",
+) -> dict[int, str]:
+    """Resolve a name pattern to {id: value} from the StringIds table.
+
+    StringIds is small (typically <1000 rows), so this is always fast —
+    even on multi-GB profiles where the kernel table has millions of rows.
+    """
+    if match_mode == "exact":
+        sql = "SELECT id, value FROM StringIds WHERE value = ?"
+        params: list[Any] = [pattern]
+    else:
+        sql = "SELECT id, value FROM StringIds WHERE value LIKE ? ESCAPE '\\'"
+        params = [f"%{_escape_like(pattern)}%"]
+
+    cur = conn.execute(sql, params)
+    return {int(row[0]): str(row[1]) for row in cur.fetchall()}
+
+
+def _ensure_kernel_indexes(conn: sqlite3.Connection) -> None:
+    """Create indexes on kernel/runtime tables if the DB is writable.
+
+    Indexes on ``shortName``, ``start``, and ``correlationId`` dramatically
+    speed up kernel lookups on large profiles.  On a read-only connection
+    (e.g. ``?mode=ro``) this silently does nothing.
+    """
+    schema = NsightSchema(conn)
+    try:
+        if schema.kernel_table:
+            kt = schema.kernel_table
+            conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_kernel_shortname ON {kt}(shortName)"
+            )
+            conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_kernel_start ON {kt}(start)"
+            )
+            conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_kernel_corr ON {kt}(correlationId)"
+            )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_runtime_corr "
+            "ON CUPTI_ACTIVITY_KIND_RUNTIME(correlationId)"
+        )
+    except Exception:
+        pass  # read-only DB or missing table — skip silently
+
+
 def find_kernels_by_name(
     conn: sqlite3.Connection,
     kernel_name: str,
@@ -139,16 +299,14 @@ def find_kernels_by_name(
     match_mode: str = "contains",
     device_id: int | None = None,
 ) -> list[RowDict]:
-    """
-    Find CUDA kernels whose shortName matches ``kernel_name`` directly.
+    """Find CUDA kernels whose shortName matches *kernel_name*.
 
-    This is the kernel-level counterpart to :func:`find_nvtx_ranges`.  It queries
-    CUPTI_ACTIVITY_KIND_KERNEL (or KERNEL_V2) directly by kernel short name,
-    without requiring an enclosing NVTX range.
+    Uses a **two-step strategy** for performance on large profiles:
 
-    Returns a list of dicts with:
-        name, start_ns, end_ns, duration_ns, device_id, stream_id
-    ordered by start_ns ascending.
+    1. Resolve ``kernel_name`` → integer id(s) via ``StringIds`` (tiny table).
+    2. Query the kernel table with ``shortName IN (…)`` — no JOIN needed.
+
+    Returns a list of dicts ordered by ``start_ns``.
     """
     if not kernel_name:
         return []
@@ -157,13 +315,18 @@ def find_kernels_by_name(
     if not schema.kernel_table:
         return []
 
+    # Step 1 — resolve name to StringIds (instant, <1000 rows)
+    id_map = _resolve_string_ids(conn, kernel_name, match_mode=match_mode)
+    if not id_map:
+        return []
+
+    # Optionally create indexes (no-op on read-only connections)
+    _ensure_kernel_indexes(conn)
+
+    # Step 2 — query kernel table by integer id(s)
     kernel_table = schema.kernel_table
-    if match_mode == "exact":
-        name_filter = "s.value = ?"
-        params: list[Any] = [kernel_name]
-    else:
-        name_filter = "s.value LIKE ? ESCAPE '\\'"
-        params = [f"%{_escape_like(kernel_name)}%"]
+    placeholders = ",".join("?" * len(id_map))
+    params: list[Any] = list(id_map.keys())
 
     dev_filter = ""
     if device_id is not None:
@@ -171,23 +334,23 @@ def find_kernels_by_name(
         params.append(int(device_id))
 
     sql = (
-        f"SELECT s.value AS name, k.start AS start_ns, k.[end] AS end_ns, "
+        f"SELECT k.shortName, k.start AS start_ns, k.[end] AS end_ns, "
         f"(k.[end] - k.start) AS duration_ns, k.deviceId, k.streamId "
         f"FROM {kernel_table} k "
-        f"JOIN StringIds s ON k.shortName = s.id "
-        f"WHERE {name_filter} AND k.[end] > k.start {dev_filter} "
+        f"WHERE k.shortName IN ({placeholders}) "
+        f"AND k.[end] > k.start {dev_filter} "
         f"ORDER BY k.start"
     )
 
     cur = conn.execute(sql, params)
     kernels: list[RowDict] = []
-    for name, start_ns, end_ns, duration_ns, dev, stream_id in cur.fetchall():
+    for short_id, start_ns, end_ns, duration_ns, dev, stream_id in cur.fetchall():
         d = int(duration_ns) if duration_ns is not None else int(end_ns) - int(start_ns)
         if d <= 0:
             continue
         kernels.append(
             {
-                "name": str(name) if name else "",
+                "name": id_map.get(int(short_id), ""),
                 "start_ns": int(start_ns),
                 "end_ns": int(end_ns),
                 "duration_ns": d,
@@ -575,19 +738,18 @@ def compute_region_mfu(
     match_mode: str = "contains",
 ) -> RowDict | ErrorDict:
     """
-    Convenience wrapper that opens the profile in read-only mode.
+    Convenience wrapper that opens the profile and creates indexes if needed.
 
-    This is suitable for scripts and potential future CLI usage. The chat
-    agent should prefer :func:`compute_region_mfu_from_conn` to reuse its
-    existing connection.
+    Opens in writable mode so ``_ensure_kernel_indexes`` can add indexes for
+    fast kernel lookups on large profiles.  The chat agent should prefer
+    :func:`compute_region_mfu_from_conn` to reuse its existing connection.
     """
     try:
         sqlite_path = resolve_profile_path(profile_path)
     except RuntimeError as e:
         return _error("PROFILE_NOT_LOADED", f"Profile error: {e}")
 
-    uri = f"file:{sqlite_path}?mode=ro"
-    conn = sqlite3.connect(uri, uri=True)
+    conn = sqlite3.connect(sqlite_path)
     conn.row_factory = sqlite3.Row
     try:
         return compute_region_mfu_from_conn(
