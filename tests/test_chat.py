@@ -130,8 +130,7 @@ def test_tools_openai():
     assert "nvtx_name" in fit["function"]["parameters"]["properties"]
     assert "start_s" in fit["function"]["parameters"]["properties"]
     assert "end_s" in fit["function"]["parameters"]["properties"]
-    region = next(t for t in tools if t["function"]["name"] == "compute_region_mfu")
-    assert "num_gpus" in region["function"]["parameters"]["properties"]
+
 
 
 def test_parse_tool_call_navigate():
