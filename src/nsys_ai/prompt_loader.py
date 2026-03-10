@@ -38,7 +38,7 @@ def load_skill(relative_path: str) -> str:
         content = path.read_text(encoding="utf-8")
         _log.debug("prompt_loader: loaded %s (%d chars)", path, len(content))
         return content
-    except (OSError, IOError) as exc:
+    except OSError as exc:
         _log.debug("prompt_loader: could not load '%s': %s", relative_path, exc)
         return ""
 

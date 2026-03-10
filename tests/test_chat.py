@@ -659,7 +659,7 @@ def test_stream_agent_loop_skill_names_injected(monkeypatch, tmp_path):
     with patch.dict(sys.modules, {"litellm": mock_lt}):
         if "litellm" in chat_mod.__dict__:
             del chat_mod.__dict__["litellm"]
-        events = list(
+        list(
             chat_mod.stream_agent_loop(
                 model="gpt-4o",
                 messages=[{"role": "user", "content": "help"}],

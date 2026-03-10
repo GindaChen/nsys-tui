@@ -1,10 +1,5 @@
 """Tests for prompt_loader and the skill_docs integration in _build_system_prompt."""
 
-import os
-from pathlib import Path
-
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # prompt_loader tests
@@ -102,7 +97,8 @@ def test_env_var_override(tmp_path, monkeypatch):
 
     monkeypatch.setenv("NSYS_AI_SKILLS_DIR", str(skills_alt))
     # Re-import to pick up the env var (import fresh module)
-    import importlib
+    import importlib  # noqa: E401
+
     import nsys_ai.prompt_loader as pl
     importlib.reload(pl)  # picks up the new env var
     monkeypatch.setattr(pl, "SKILLS_DIR", skills_alt)  # ensure patched too
