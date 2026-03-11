@@ -358,7 +358,7 @@ function rebuildDataFromCache() {
     }
     Object.values(streamMap).forEach(ks => ks.sort((a, b) => a.start_ns - b.start_ns));
 
-    // Time bounds (use reduce instead of spread to avoid RangeError on large arrays)
+    // Time bounds (use explicit loops instead of spread to avoid RangeError on large arrays)
     if (kernels.length || nvtxSpans.length) {
         timeStart = Infinity; timeEnd = -Infinity;
         for (let i = 0; i < kernels.length; i++) {
@@ -744,7 +744,7 @@ function _normalizeKernelName(name) {
     return name
         .replace(/<[^>]*>/g, '')           // strip template args
         .replace(/0x[0-9a-f]+/gi, '')      // strip hex pointers
-        .replace(/(_)?\d+/g, '')           // strip numeric suffixes
+        .replace(/(_)?\d+$/g, '')          // strip numeric suffixes at end of name
         .replace(/\s+/g, ' ')
         .trim();
 }
@@ -1948,12 +1948,13 @@ function onSearch() {
     if (raw.length >= 2 && raw.startsWith('/') && raw.lastIndexOf('/') > 0) {
         const lastSlash = raw.lastIndexOf('/');
         const pattern = raw.slice(1, lastSlash);
-        const flags = raw.slice(lastSlash + 1) || 'i';
+        const flags = (raw.slice(lastSlash + 1) || 'i').replace(/[gy]/g, '');
         if (pattern) {
             try {
                 matcher = new RegExp(pattern, flags);
                 isRegex = true;
             } catch (e) {
+                searchQuery = '';
                 document.getElementById('searchHint').textContent = 'invalid regex';
                 draw();
                 return;
