@@ -7,7 +7,6 @@ Also supports loading skills from markdown files in custom directories.
 
 import importlib
 import logging
-import os
 import pkgutil
 import re
 import sqlite3
