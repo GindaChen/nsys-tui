@@ -574,25 +574,117 @@ def _cmd_chat(args, _profile):
 
 
 def _cmd_skill(args, _profile):
-    from nsys_ai.skills.registry import all_skills
+    import json as _json
+
+    from nsys_ai.skills.registry import all_skills, get_skill, load_custom_skills_dir
     from nsys_ai.skills.registry import run_skill as _run_skill
+
+    # Load custom skills from --skills-dir or env var
+    skills_dir = getattr(args, "skills_dir", None) or os.environ.get(
+        "NSYS_AI_CUSTOM_SKILLS_DIR"
+    )
+    if skills_dir and os.path.isdir(skills_dir):
+        load_custom_skills_dir(skills_dir)
 
     if args.skill_action == "list":
         skills = all_skills()
-        print(f"{'Name':<25s}  {'Category':<15s}  Description")
-        print("-" * 80)
-        for s in skills:
-            print(f"{s.name:<25s}  {s.category:<15s}  {s.description[:60]}")
+        fmt = getattr(args, "format", "text")
+        if fmt == "json":
+            print(
+                _json.dumps(
+                    [
+                        {
+                            "name": s.name,
+                            "title": s.title,
+                            "description": s.description,
+                            "category": s.category,
+                            "params": [
+                                {
+                                    "name": p.name,
+                                    "type": p.type,
+                                    "required": p.required,
+                                    "default": p.default,
+                                }
+                                for p in s.params
+                            ],
+                        }
+                        for s in skills
+                    ],
+                    indent=2,
+                )
+            )
+        else:
+            print(f"{'Name':<25s}  {'Category':<15s}  Description")
+            print("-" * 80)
+            for s in skills:
+                print(f"{s.name:<25s}  {s.category:<15s}  {s.description[:60]}")
     elif args.skill_action == "run":
         import sqlite3
 
+        fmt = getattr(args, "format", "text")
         conn = sqlite3.connect(args.profile)
         try:
-            print(_run_skill(args.skill_name, conn))
+            if fmt == "json":
+                skill = get_skill(args.skill_name)
+                if not skill:
+                    available = ", ".join(s.name for s in all_skills())
+                    print(
+                        _json.dumps(
+                            {
+                                "error": f"Unknown skill '{args.skill_name}'",
+                                "available": available,
+                            }
+                        )
+                    )
+                    sys.exit(1)
+                rows = skill.execute(conn)
+                print(_json.dumps(rows, indent=2))
+            else:
+                print(_run_skill(args.skill_name, conn))
         finally:
             conn.close()
+    elif args.skill_action == "add":
+        from pathlib import Path
+        import shutil
+
+        from nsys_ai.skills.registry import load_skill_from_markdown
+
+        if not skills_dir:
+            print("Error: --skills-dir is required for 'skill add'", file=sys.stderr)
+            sys.exit(1)
+        src = Path(args.skill_file)
+        if not src.exists():
+            print(f"Error: file not found: {src}", file=sys.stderr)
+            sys.exit(1)
+        dst_dir = Path(skills_dir)
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        dst = dst_dir / src.name
+        shutil.copy2(src, dst)
+        skill = load_skill_from_markdown(str(dst))
+        print(f"Added skill '{skill.name}' → {dst}")
+    elif args.skill_action == "remove":
+        from pathlib import Path
+
+        if not skills_dir:
+            print("Error: --skills-dir is required for 'skill remove'", file=sys.stderr)
+            sys.exit(1)
+        target = Path(skills_dir) / f"{args.skill_name}.md"
+        if target.exists():
+            target.unlink()
+            print(f"Removed skill '{args.skill_name}'")
+        else:
+            print(f"No custom skill file found: {target}")
+    elif args.skill_action == "save":
+        from nsys_ai.skills.registry import save_skill_to_markdown
+
+        skill = get_skill(args.skill_name)
+        if not skill:
+            print(f"Unknown skill: {args.skill_name}", file=sys.stderr)
+            sys.exit(1)
+        save_skill_to_markdown(skill, args.output)
+        print(f"Saved '{skill.name}' → {args.output}")
     else:
-        print("Usage: nsys-ai skill {list,run} ...")
+        print("Usage: nsys-ai skill {list,run,add,remove,save} ...")
         sys.exit(1)
 
 
@@ -864,11 +956,35 @@ def _register_legacy_commands(sub):
     p.set_defaults(handler=_cmd_timeline)
 
     p = sub.add_parser("skill", help="List or run analysis skills")
+    p.add_argument(
+        "--skills-dir",
+        default=None,
+        help="Directory for custom skills (.md files)",
+    )
     skill_sub = p.add_subparsers(dest="skill_action")
-    skill_sub.add_parser("list", help="List all available skills")
+    sp_list = skill_sub.add_parser("list", help="List all available skills")
+    sp_list.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format (default: text)",
+    )
     sp_run = skill_sub.add_parser("run", help="Run a skill against a profile")
     sp_run.add_argument("skill_name", help="Name of the skill to run")
     sp_run.add_argument("profile", help="Path to .sqlite file")
+    sp_run.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format (default: text)",
+    )
+    sp_add = skill_sub.add_parser("add", help="Add a custom skill from .md file")
+    sp_add.add_argument("skill_file", help="Path to skill .md file")
+    sp_rm = skill_sub.add_parser("remove", help="Remove a custom skill")
+    sp_rm.add_argument("skill_name", help="Name of the skill to remove")
+    sp_save = skill_sub.add_parser("save", help="Export a skill to .md file")
+    sp_save.add_argument("skill_name", help="Name of the skill to export")
+    sp_save.add_argument("-o", "--output", required=True, help="Output .md file")
     p.set_defaults(handler=_cmd_skill)
 
     p = sub.add_parser("agent", help="AI agent for profile analysis")
