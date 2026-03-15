@@ -65,9 +65,12 @@ nsys-ai report profile.sqlite --gpu 0 --trim 1.0 5.0 -o report.md
 |---------|-------|---------|
 | `nsys-ai open <profile>` | Opens in Perfetto/web/TUI viewer | Quick visual inspection |
 | `nsys-ai web <profile> --gpu 0 --trim 1 5` | Serves interactive web viewer | Browser-based timeline exploration |
+| `nsys-ai timeline-web <profile>` | Serves timeline-focused web UI | Full timeline + AI chat + evidence sidebar |
 | `nsys-ai chat <profile>` | Interactive AI chat TUI | Multi-turn analysis session |
 | `nsys-ai export <profile> --gpu 0 --trim 1 5` | Export Perfetto JSON | Post-processing / sharing |
 | `nsys-ai diff-web <before> <after>` | Web diff viewer | Visual side-by-side comparison |
+| `nsys-ai agent analyze <profile>` | Full auto-analysis report | CLI auto-analysis (no LLM needed) |
+| `nsys-ai agent ask <profile> "<question>"` | Ask a targeted question | Keyword-based skill selection |
 
 ### Common agent workflows
 
@@ -83,6 +86,53 @@ nsys-ai diff before.sqlite after.sqlite --chat  # deep-dive if needed
 # Workflow 3: Full report to file
 nsys-ai report profile.sqlite --gpu 0 --trim 1 5 -o analysis.md
 cat analysis.md
+
+# Workflow 4: Visual evidence for human verification
+# See docs/agent_skills/commands/evidence_schema.md for Finding JSON format
+
+# 4a: Agent-driven evidence (recommended for external agents)
+#     Full agent loop: collect → reason → conclude → write findings → view
+#
+#   Step 1: COLLECT — query multiple skills for raw data
+nsys-ai skill run gpu_idle_gaps profile.sqlite --format json > /tmp/gaps.json
+nsys-ai skill run nccl_breakdown profile.sqlite --format json > /tmp/nccl.json
+nsys-ai skill run top_kernels profile.sqlite --format json > /tmp/kernels.json
+#
+#   Step 2: REASON — agent (AI) analyzes the collected data:
+#     - Cross-references gaps, NCCL, and kernel data
+#     - Identifies root causes (e.g. "21s bubble caused by serialized NCCL")
+#     - Draws conclusions with supporting evidence
+#     (This is the agent's own LLM reasoning — not a nsys-ai command)
+#
+#   Step 3: WRITE — agent writes conclusions + supporting time ranges
+#     Each finding in findings.json must:
+#     - Have a conclusion LABEL (not just raw data)
+#     - Reference the specific start_ns/end_ns that proves the conclusion
+#     - Include a NOTE explaining WHY this time range matters
+cat > /tmp/findings.json << 'EOF'
+{
+  "title": "Pipeline Parallelism Bubble Analysis",
+  "findings": [
+    {
+      "type": "region",
+      "label": "PP Bubble: 21s idle caused by serialized NCCL",
+      "start_ns": 89886440111, "end_ns": 110951683466,
+      "severity": "critical",
+      "note": "GPU idle for 21s after AllReduce — NCCL not overlapping with compute"
+    }
+  ]
+}
+EOF
+#
+#   Step 4: VIEW — open timeline with evidence overlay
+nsys-ai timeline-web profile.sqlite --findings /tmp/findings.json
+
+# 4b: Auto-analyze evidence (built-in heuristics, no agent reasoning)
+nsys-ai agent analyze profile.sqlite --evidence -o findings.json
+nsys-ai timeline-web profile.sqlite --findings findings.json
+
+# 4c: One-step auto-analyze (quickest)
+nsys-ai timeline-web profile.sqlite --auto-analyze
 ```
 
 ---
@@ -117,7 +167,7 @@ cat analysis.md
 ## Tool Sets
 
 ### Set A — Single Profile
-`query_profile_db` · `get_gpu_peak_tflops` · `compute_theoretical_flops` · `compute_region_mfu` · `compute_mfu` · `navigate_to_kernel` · `zoom_to_time_range` · `fit_nvtx_range`
+`query_profile_db` · `get_gpu_peak_tflops` · `compute_theoretical_flops` · `compute_region_mfu` · `compute_mfu` · `navigate_to_kernel` · `zoom_to_time_range` · `fit_nvtx_range` · `get_gpu_overlap_stats` · `get_nccl_breakdown`
 
 ### Set B — Diff Mode (two profiles loaded)
 All of Set A, plus:

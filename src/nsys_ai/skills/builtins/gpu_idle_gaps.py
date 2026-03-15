@@ -40,8 +40,11 @@ WITH ordered AS (
            LAG(s.value) OVER (PARTITION BY k.streamId ORDER BY k.start) AS prev_kernel
     FROM CUPTI_ACTIVITY_KIND_KERNEL k
     JOIN StringIds s ON k.shortName = s.id
+    WHERE 1=1 {trim_clause}
 )
 SELECT streamId,
+       prev_end AS start_ns,
+       start AS end_ns,
        ROUND((start - prev_end) / 1e6, 3) AS gap_ms,
        prev_kernel AS before_kernel,
        kernel_name AS after_kernel
