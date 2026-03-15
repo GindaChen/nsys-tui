@@ -34,6 +34,11 @@ def _read_template_text(name: str) -> str:
         return f.read()
 
 
+def _escape_json_for_html_script(json_str: str) -> str:
+    """Escape '</' in JSON so it can be safely embedded in a <script> block."""
+    return json_str.replace("</", "<\\/")
+
+
 def generate_html(prof, device: int, trim: tuple[int, int]) -> str:
     """Generate a standalone HTML page showing the NVTX stack trace."""
     roots = build_nvtx_tree(prof, device, trim)
@@ -51,6 +56,9 @@ def generate_html(prof, device: int, trim: tuple[int, int]) -> str:
     trim_sec = (trim[0] / 1e9, trim[1] / 1e9)
     profile_id = f"{device}_{trim_sec[0]:.1f}_{trim_sec[1]:.1f}"
 
+    # Escape profile path for safe embedding in <script>
+    safe_profile_path = _escape_json_for_html_script(json.dumps(prof.path))
+
     tmpl = _load_template("nvtx_tree.html")
     db_agent_flag = os.environ.get("NSYS_AI_DB_AGENT", "").strip().lower()
     db_agent_enabled = bool(db_agent_flag) and db_agent_flag not in ("0", "false", "no", "off")
@@ -59,7 +67,7 @@ def generate_html(prof, device: int, trim: tuple[int, int]) -> str:
         GPU_LABEL=gpu_label,
         TRIM_LABEL=f"{trim[0] / 1e9:.1f}s - {trim[1] / 1e9:.1f}s",
         PROFILE_ID=profile_id,
-        PROFILE_PATH=prof.path,
+        PROFILE_PATH=safe_profile_path,
         DB_AGENT_ENABLED="1" if db_agent_enabled else "",
     )
 
@@ -298,14 +306,13 @@ def generate_timeline_html(
         trim_label = "Progressive"
         progressive = "1"
 
-    def _escape_json_for_html_script(json_str: str) -> str:
-        """Escape '</' in JSON so it can be safely embedded in a <script> block."""
-        return json_str.replace("</", "<\\/")
-
     safe_data_json = _escape_json_for_html_script(data_json)
     safe_gpu_info_json = _escape_json_for_html_script(gpu_info_json)
     safe_gpu_label_json = _escape_json_for_html_script(gpu_label_json)
     safe_findings_json = _escape_json_for_html_script(json.dumps(findings_data or []))
+    safe_profile_path_json = _escape_json_for_html_script(
+        json.dumps(profile_path) if profile_path is not None else "null"
+    )
 
     tmpl = _load_template("timeline.html")
     return tmpl.safe_substitute(
@@ -319,7 +326,7 @@ def generate_timeline_html(
         TIMELINE_JS_SRC=timeline_js_src,
         API_PREFIX=api_prefix,
         FINDINGS_JSON=safe_findings_json,
-        PROFILE_PATH=json.dumps(profile_path) if profile_path is not None else "null",
+        PROFILE_PATH=safe_profile_path_json,
     )
 
 
@@ -400,7 +407,36 @@ def generate_evidence_html(
 
     streams = sorted(streams_set)
 
-    tmpl = _load_template("evidence.html")
+    # Load evidence template from disk when available; otherwise fall back to a
+    # minimal inline template so this view does not fail when the asset is
+    # missing from the templates directory.
+    evidence_template_path = os.path.join(_TEMPLATE_DIR, "evidence.html")
+    if os.path.exists(evidence_template_path):
+        tmpl = _load_template("evidence.html")
+    else:
+        tmpl = Template(
+            """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>${TITLE}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="${EVIDENCE_CSS_HREF}">
+</head>
+<body>
+    <div id="app" data-api-prefix="${API_PREFIX}"
+         data-gpu-label='${GPU_LABEL_JSON}'
+         data-time-range='${TIME_RANGE_JSON}'
+         data-findings='${FINDINGS_JSON}'
+         data-kernels='${KERNELS_JSON}'
+         data-streams='${STREAMS_JSON}'
+         data-progressive="${PROGRESSIVE}">
+    </div>
+    <script src="${EVIDENCE_JS_SRC}"></script>
+</body>
+</html>
+"""
+        )
     return tmpl.safe_substitute(
         TITLE=title,
         FINDINGS_JSON=json.dumps(findings_data),

@@ -2434,7 +2434,9 @@ async function sendChat() {
                     } else if (currentEvent === 'action') {
                         executeAIAction(payload);
                     } else if (currentEvent === 'finding') {
-                        const idx = addFinding(payload);
+                        const idx = Number.isFinite(payload.index)
+                            ? payload.index
+                            : addFinding(payload);
                         appendChatMsg('system',
                             `📋 Finding ${idx}: ${payload.label || ''}`, 'system');
                     }

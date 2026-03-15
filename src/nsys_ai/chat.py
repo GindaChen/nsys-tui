@@ -18,6 +18,7 @@ import logging
 import os
 import sys
 from collections.abc import Callable
+import threading
 
 # ---------------------------------------------------------------------------
 # Sub-module re-exports — keep the public API stable for existing callers.
@@ -56,13 +57,15 @@ _telemetry_log = logging.getLogger("nsys_ai.telemetry")
 # the `submit_finding` tool. This allows the model to refer to them as
 # "[Finding N]" using a concrete, server-tracked index.
 _finding_counter = 0
+_finding_counter_lock = threading.Lock()
 
 
 def _next_finding_index() -> int:
     """Allocate and return the next finding index."""
     global _finding_counter
-    _finding_counter += 1
-    return _finding_counter
+    with _finding_counter_lock:
+        _finding_counter += 1
+        return _finding_counter
 
 
 # ---------------------------------------------------------------------------
@@ -946,29 +949,33 @@ def stream_agent_loop(
                         from .profile import Profile as _OverlapProfile
                         from .overlap import overlap_analysis as _overlap_fn
 
-                        _prof = _OverlapProfile(sqlite_path)
-                        _devices = _prof.meta.devices or [0]
-                        _start_s = args.get("start_s")
-                        _end_s = args.get("end_s")
-                        _trim = (
-                            (int(float(_start_s) * 1e9), int(float(_end_s) * 1e9))
-                            if _start_s is not None and _end_s is not None
-                            else None
-                        )
-                        _per_gpu = []
-                        for _dev in _devices:
-                            _oa = _overlap_fn(_prof, _dev, _trim)
-                            if isinstance(_oa, dict) and "error" not in _oa:
-                                _oa["gpu_id"] = _dev
-                                _gpu_info = _prof.meta.gpu_info.get(_dev)
-                                if _gpu_info:
-                                    _oa["gpu_name"] = _gpu_info.name
-                                _per_gpu.append(_oa)
-                        result = {
-                            "device_count": len(_devices),
-                            "per_gpu": _per_gpu,
-                        }
-                        _prof.close()
+                        _prof = None
+                        try:
+                            _prof = _OverlapProfile(sqlite_path)
+                            _devices = _prof.meta.devices or [0]
+                            _start_s = args.get("start_s")
+                            _end_s = args.get("end_s")
+                            _trim = (
+                                (int(float(_start_s) * 1e9), int(float(_end_s) * 1e9))
+                                if _start_s is not None and _end_s is not None
+                                else None
+                            )
+                            _per_gpu = []
+                            for _dev in _devices:
+                                _oa = _overlap_fn(_prof, _dev, _trim)
+                                if isinstance(_oa, dict) and "error" not in _oa:
+                                    _oa["gpu_id"] = _dev
+                                    _gpu_info = _prof.meta.gpu_info.get(_dev)
+                                    if _gpu_info:
+                                        _oa["gpu_name"] = _gpu_info.name
+                                    _per_gpu.append(_oa)
+                            result = {
+                                "device_count": len(_devices),
+                                "per_gpu": _per_gpu,
+                            }
+                        finally:
+                            if _prof is not None:
+                                _prof.close()
                     except Exception as _e:
                         result = {"error": str(_e)}
                     api_messages.append({
@@ -988,22 +995,26 @@ def stream_agent_loop(
                         from .profile import Profile as _NcclProfile
                         from .overlap import nccl_breakdown as _nccl_fn
 
-                        _prof = _NcclProfile(sqlite_path)
-                        _devices = _prof.meta.devices or [0]
-                        _dev = args.get("device_id", _devices[0])
-                        _start_s = args.get("start_s")
-                        _end_s = args.get("end_s")
-                        _trim = (
-                            (int(float(_start_s) * 1e9), int(float(_end_s) * 1e9))
-                            if _start_s is not None and _end_s is not None
-                            else None
-                        )
-                        _rows = _nccl_fn(_prof, int(_dev), _trim)
-                        result = {
-                            "device_id": _dev,
-                            "collectives": _rows,
-                        }
-                        _prof.close()
+                        _prof = None
+                        try:
+                            _prof = _NcclProfile(sqlite_path)
+                            _devices = _prof.meta.devices or [0]
+                            _dev = args.get("device_id", _devices[0])
+                            _start_s = args.get("start_s")
+                            _end_s = args.get("end_s")
+                            _trim = (
+                                (int(float(_start_s) * 1e9), int(float(_end_s) * 1e9))
+                                if _start_s is not None and _end_s is not None
+                                else None
+                            )
+                            _rows = _nccl_fn(_prof, int(_dev), _trim)
+                            result = {
+                                "device_id": _dev,
+                                "collectives": _rows,
+                            }
+                        finally:
+                            if _prof is not None:
+                                _prof.close()
                     except Exception as _e:
                         result = {"error": str(_e)}
                     api_messages.append({

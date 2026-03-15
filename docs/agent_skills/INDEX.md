@@ -88,11 +88,21 @@ nsys-ai report profile.sqlite --gpu 0 --trim 1 5 -o analysis.md
 cat analysis.md
 
 # Workflow 4: Visual evidence for human verification
-# Step 1: Run analysis and export findings with visual evidence
+# See docs/agent_skills/commands/evidence_schema.md for Finding JSON format
+
+# 4a: Agent-driven evidence (recommended for external agents)
+#     Agent queries data, reasons about it, writes findings.json with only
+#     the time ranges that support its conclusions, then opens viewer.
+nsys-ai skill run gpu_idle_gaps profile.sqlite --format json   # get timestamps
+nsys-ai skill run nccl_breakdown profile.sqlite --format json  # get NCCL data
+# ... agent writes /tmp/findings.json based on its conclusions ...
+nsys-ai timeline-web profile.sqlite --findings /tmp/findings.json
+
+# 4b: Auto-analyze evidence (built-in heuristics, no agent reasoning)
 nsys-ai agent analyze profile.sqlite --evidence -o findings.json
-# Step 2: Open timeline with findings overlay for human review
 nsys-ai timeline-web profile.sqlite --findings findings.json
-# Or run auto-analyze on startup (no pre-existing findings needed)
+
+# 4c: One-step auto-analyze (quickest)
 nsys-ai timeline-web profile.sqlite --auto-analyze
 ```
 

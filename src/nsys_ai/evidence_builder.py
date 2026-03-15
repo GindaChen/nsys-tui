@@ -83,14 +83,14 @@ class EvidenceBuilder:
         self, top_n: int = 5, min_gap_ns: int = 1_000_000
     ) -> list[Finding]:
         """Top N idle gaps between consecutive kernels → region findings."""
-        sql = """\
+        sql = f"""\
 WITH ordered AS (
     SELECT k.streamId, k.deviceId,
            k.start, k.[end],
            LAG(k.[end]) OVER (
                PARTITION BY k.streamId ORDER BY k.start
            ) AS prev_end
-    FROM CUPTI_ACTIVITY_KIND_KERNEL k
+    FROM {self.prof.schema.kernel_table} k
     WHERE k.deviceId = ? AND k.[end] >= ? AND k.start <= ?
 )
 SELECT streamId, deviceId, prev_end AS gap_start, start AS gap_end,
@@ -120,10 +120,10 @@ LIMIT ?"""
 
     def _nccl_stalls(self, top_n: int = 3) -> list[Finding]:
         """Longest individual NCCL kernel instances → highlight findings."""
-        sql = """\
+        sql = f"""\
 SELECT k.start, k.[end], k.streamId, k.deviceId,
        s.value AS name, (k.[end] - k.start) AS dur_ns
-FROM CUPTI_ACTIVITY_KIND_KERNEL k
+FROM {self.prof.schema.kernel_table} k
 JOIN StringIds s ON k.shortName = s.id
 WHERE k.deviceId = ?
   AND (s.value LIKE '%nccl%' OR s.value LIKE '%NCCL%')
@@ -151,10 +151,10 @@ LIMIT ?"""
 
     def _kernel_hotspots(self, top_n: int = 3) -> list[Finding]:
         """Top longest non-NCCL kernel instances → highlight."""
-        sql = """\
+        sql = f"""\
 SELECT s.value AS name, k.start, k.[end], k.streamId,
        (k.[end] - k.start) AS dur_ns
-FROM CUPTI_ACTIVITY_KIND_KERNEL k
+FROM {self.prof.schema.kernel_table} k
 JOIN StringIds s ON k.shortName = s.id
 WHERE k.deviceId = ?
   AND NOT (s.value LIKE '%nccl%' OR s.value LIKE '%NCCL%')

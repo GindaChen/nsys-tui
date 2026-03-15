@@ -674,10 +674,12 @@ class _EvidenceHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
         if path == "/assets/evidence.css":
-            self._serve_asset("evidence.css", "text/css; charset=utf-8")
+            # Reuse the existing timeline.css asset for evidence CSS.
+            self._serve_asset("timeline.css", "text/css; charset=utf-8")
             return
         if path == "/assets/evidence.js":
-            self._serve_asset("evidence.js", "application/javascript; charset=utf-8")
+            # Reuse the existing timeline.js asset for evidence JS.
+            self._serve_asset("timeline.js", "application/javascript; charset=utf-8")
             return
         if path == "/api/data":
             self._handle_data()
