@@ -138,11 +138,29 @@ class Profile:
     def __init__(self, path: str):
         self.path = path
         self._lock = threading.Lock()
+        self._owns_conn = True
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.schema = NsightSchema(self.conn)
         self.meta = self._discover()
         self._nvtx_has_text_id: bool = self._detect_nvtx_text_id()
+
+    @classmethod
+    def _from_conn(cls, conn: sqlite3.Connection) -> "Profile":
+        """Wrap an existing connection as a Profile without opening a new file.
+
+        The connection is borrowed — ``close()`` will NOT close it.
+        """
+        conn.row_factory = sqlite3.Row
+        obj = cls.__new__(cls)
+        obj.conn = conn
+        obj._lock = threading.Lock()
+        obj._owns_conn = False
+        obj.path = ""
+        obj.schema = NsightSchema(conn)
+        obj.meta = obj._discover()
+        obj._nvtx_has_text_id = obj._detect_nvtx_text_id()
+        return obj
 
     def _detect_nvtx_text_id(self) -> bool:
         """Return True if NVTX_EVENTS uses textId -> StringIds (newer schema)."""
@@ -545,7 +563,8 @@ class Profile:
                 ).fetchall()
 
     def close(self):
-        self.conn.close()
+        if getattr(self, '_owns_conn', True):
+            self.conn.close()
 
     def __enter__(self) -> "Profile":
         return self

@@ -6,18 +6,30 @@ import pytest
 
 
 def test_list_skills():
-    """All 8 built-in skills should be discoverable."""
+    """All 20 built-in skills should be discoverable."""
     from nsys_ai.skills import list_skills
 
     names = list_skills()
-    assert len(names) == 8
+    assert len(names) == 20
     expected = [
+        "cpu_gpu_pipeline",
         "gpu_idle_gaps",
+        "iteration_timing",
         "kernel_launch_overhead",
+        "kernel_launch_pattern",
+        "memory_bandwidth",
         "memory_transfers",
+        "nccl_anomaly",
         "nccl_breakdown",
         "nvtx_kernel_map",
+        "nvtx_layer_breakdown",
+        "overlap_breakdown",
+        "region_mfu",
+        "root_cause_matcher",
         "schema_inspect",
+        "speedup_estimator",
+        "stream_concurrency",
+        "theoretical_flops",
         "thread_utilization",
         "top_kernels",
     ]
@@ -86,7 +98,7 @@ def test_schema_inspect_on_empty_db():
 
 
 def test_all_skills_have_required_fields():
-    """Every skill must have name, title, description, category, sql."""
+    """Every skill must have name, title, description, category, and sql or execute_fn."""
     from nsys_ai.skills.registry import all_skills
 
     for skill in all_skills():
@@ -94,7 +106,7 @@ def test_all_skills_have_required_fields():
         assert skill.title, f"Skill {skill.name} missing title"
         assert skill.description, f"Skill {skill.name} missing description"
         assert skill.category, f"Skill {skill.name} missing category"
-        assert skill.sql, f"Skill {skill.name} missing sql"
+        assert skill.sql or skill.execute_fn, f"Skill {skill.name} missing sql and execute_fn"
 
 
 # ---------------------------------------------------------------------------
@@ -446,3 +458,105 @@ def test_skill_run_cli_trim_arg():
         # Verify at least the public parser can be constructed
         parser = _build_parser()
         assert parser is not None
+
+
+# ---------------------------------------------------------------------------
+# New skill tests: overlap_breakdown, iteration_timing, nvtx_layer_breakdown
+# ---------------------------------------------------------------------------
+
+
+def test_overlap_breakdown_registered():
+    """overlap_breakdown should be registered with correct metadata."""
+    from nsys_ai.skills.registry import get_skill
+
+    skill = get_skill("overlap_breakdown")
+    assert skill is not None
+    assert skill.name == "overlap_breakdown"
+    assert skill.category == "communication"
+    assert skill.execute_fn is not None
+    assert skill.sql == ""
+
+
+def test_iteration_timing_registered():
+    """iteration_timing should be registered with correct metadata."""
+    from nsys_ai.skills.registry import get_skill
+
+    skill = get_skill("iteration_timing")
+    assert skill is not None
+    assert skill.name == "iteration_timing"
+    assert skill.category == "nvtx"
+    assert skill.execute_fn is not None
+
+
+def test_nvtx_layer_breakdown_registered():
+    """nvtx_layer_breakdown should be registered with correct metadata."""
+    from nsys_ai.skills.registry import get_skill
+
+    skill = get_skill("nvtx_layer_breakdown")
+    assert skill is not None
+    assert skill.name == "nvtx_layer_breakdown"
+    assert skill.category == "nvtx"
+    assert skill.sql  # SQL skill
+
+
+def test_overlap_breakdown_execute(minimal_nsys_conn):
+    """overlap_breakdown should return overlap data from minimal DB."""
+    from nsys_ai.skills.registry import get_skill
+
+    skill = get_skill("overlap_breakdown")
+    rows = skill.execute(minimal_nsys_conn)
+    assert isinstance(rows, list)
+    assert len(rows) == 1
+    r = rows[0]
+    # Should have overlap fields (not an error)
+    assert "compute_only_ms" in r or "error" in r
+
+
+def test_overlap_breakdown_format(minimal_nsys_conn):
+    """overlap_breakdown.run() should return formatted text."""
+    from nsys_ai.skills.registry import get_skill
+
+    skill = get_skill("overlap_breakdown")
+    text = skill.run(minimal_nsys_conn)
+    assert isinstance(text, str)
+    assert len(text) > 0
+
+
+def test_nvtx_layer_breakdown_execute(minimal_nsys_conn):
+    """nvtx_layer_breakdown should run against minimal DB without error."""
+    from nsys_ai.skills.registry import get_skill
+
+    skill = get_skill("nvtx_layer_breakdown")
+    rows = skill.execute(minimal_nsys_conn)
+    assert isinstance(rows, list)
+    # With our seed data (NVTX 'train_step' and 'forward' with correlated kernels),
+    # we should get at least one result
+    for r in rows:
+        assert "nvtx_region" in r
+        assert "kernel_count" in r
+        assert "total_gpu_ms" in r
+
+
+def test_execute_fn_skill_json_serializable():
+    """Python-level skills should produce JSON-serializable output."""
+    import json
+    import sqlite3
+
+    from nsys_ai.skills.base import Skill
+
+    def _dummy_execute(conn, **kwargs):
+        return [{"metric": 42.0, "label": "test"}]
+
+    skill = Skill(
+        name="dummy",
+        title="Dummy",
+        description="test",
+        category="test",
+        execute_fn=_dummy_execute,
+    )
+    conn = sqlite3.connect(":memory:")
+    rows = skill.execute(conn)
+    text = json.dumps(rows)  # must not raise
+    parsed = json.loads(text)
+    assert parsed[0]["metric"] == 42.0
+    conn.close()

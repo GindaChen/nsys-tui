@@ -42,7 +42,7 @@ JOIN CUPTI_ACTIVITY_KIND_RUNTIME r
   AND n.globalTid = r.globalTid
   AND n.start <= r.start
   AND n.[end] >= r.[end]
-JOIN CUPTI_ACTIVITY_KIND_KERNEL k
+JOIN {kernel_table} k
   ON r.correlationId = k.correlationId
 JOIN StringIds s ON k.shortName = s.id
 WHERE 1=1 {trim_clause}

@@ -147,19 +147,25 @@ class Skill:
         params:      Accepted parameters
         format_fn:   Optional function(rows) → formatted string
         tags:        Search tags for skill discovery
+        execute_fn:  Optional Python callable(conn, **kwargs) → list[dict].
+                     When set, used instead of sql for execution.
     """
 
     name: str
     title: str
     description: str
     category: str
-    sql: str
+    sql: str = ""
     params: list[SkillParam] = field(default_factory=list)
     format_fn: Callable | None = None
     tags: list[str] = field(default_factory=list)
+    execute_fn: Callable | None = None
 
     def execute(self, conn: sqlite3.Connection, **kwargs) -> list[dict]:
-        """Run the skill's SQL against a connection.
+        """Run the skill against a connection.
+
+        If ``execute_fn`` is set, delegates to it.  Otherwise runs the
+        skill's SQL query against *conn*.
 
         Args:
             conn: SQLite connection to an Nsight profile database
@@ -174,7 +180,11 @@ class Skill:
         # Auto-create performance indexes (one-time per connection).
         ensure_indexes(conn)
 
-        # Apply defaults
+        # Python-level skill: delegate to execute_fn
+        if self.execute_fn is not None:
+            return self.execute_fn(conn, **kwargs)
+
+        # SQL skill: apply defaults and run query
         resolved = {}
         for p in self.params:
             if p.name in kwargs:
@@ -194,6 +204,28 @@ class Skill:
         elif "{trim_clause}" in self.sql:
             # No trim requested — replace with empty string
             resolved["trim_clause"] = ""
+
+        # Inject resolved activity table names for versioned-table support.
+        # SQL templates use {kernel_table} etc. instead of hardcoding
+        # CUPTI_ACTIVITY_KIND_KERNEL which may be _KERNEL_V2/_V3 in
+        # newer Nsight Systems versions.
+        tables = _resolve_activity_tables(conn)
+        resolved.setdefault(
+            "kernel_table",
+            tables.get("kernel", "CUPTI_ACTIVITY_KIND_KERNEL"),
+        )
+        resolved.setdefault(
+            "runtime_table",
+            tables.get("runtime", "CUPTI_ACTIVITY_KIND_RUNTIME"),
+        )
+        resolved.setdefault(
+            "nvtx_table",
+            tables.get("nvtx", "NVTX_EVENTS"),
+        )
+        resolved.setdefault(
+            "memcpy_table",
+            "CUPTI_ACTIVITY_KIND_MEMCPY",
+        )
 
         sql = self.sql.format(**resolved) if resolved else self.sql
         cursor = conn.execute(sql)

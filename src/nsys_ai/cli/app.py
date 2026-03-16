@@ -647,6 +647,14 @@ def _cmd_skill(args, _profile):
             trim_kwargs["trim_start_ns"] = int(trim[0] * 1e9)
             trim_kwargs["trim_end_ns"] = int(trim[1] * 1e9)
 
+        # Parse --param KEY=VALUE pairs into kwargs
+        for pv in getattr(args, "param", []):
+            key, sep, val = pv.partition("=")
+            if not sep:
+                print(f"Error: --param must be KEY=VALUE, got: {pv}", file=sys.stderr)
+                sys.exit(1)
+            trim_kwargs[key] = val
+
         try:
             if fmt == "json":
                 skill = get_skill(args.skill_name)
@@ -1049,6 +1057,13 @@ def _register_legacy_commands(sub):
         choices=["text", "json"],
         default="text",
         help="Output format (default: text)",
+    )
+    sp_run.add_argument(
+        "--param", "-p",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Skill parameter, e.g. -p operation=full_model -p hidden_dim=2560",
     )
     sp_run.add_argument(
         "--trim",

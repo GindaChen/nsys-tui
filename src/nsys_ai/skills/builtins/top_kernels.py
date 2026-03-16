@@ -37,7 +37,7 @@ SELECT s.value AS kernel_name,
        ROUND(AVG(k.[end] - k.start) / 1e6, 2) AS avg_ms,
        ROUND(MIN(k.[end] - k.start) / 1e6, 2) AS min_ms,
        ROUND(MAX(k.[end] - k.start) / 1e6, 2) AS max_ms
-FROM CUPTI_ACTIVITY_KIND_KERNEL k
+FROM {kernel_table} k
 JOIN StringIds s ON k.demangledName = s.id
 WHERE 1=1 {trim_clause}
 GROUP BY s.value

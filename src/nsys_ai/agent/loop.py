@@ -9,7 +9,7 @@ extra installed, can delegate to an LLM for natural language analysis.
 
 import sqlite3
 
-from ..skills.registry import run_skill
+from ..skills.registry import get_skill, run_skill
 
 
 class Agent:
@@ -29,29 +29,55 @@ class Agent:
         "bubble": ["gpu_idle_gaps"],
         "idle": ["gpu_idle_gaps"],
         "gap": ["gpu_idle_gaps"],
-        "stall": ["gpu_idle_gaps"],
-        "memory": ["memory_transfers"],
-        "transfer": ["memory_transfers"],
-        "h2d": ["memory_transfers"],
-        "copy": ["memory_transfers"],
-        "nccl": ["nccl_breakdown"],
-        "allreduce": ["nccl_breakdown"],
-        "collective": ["nccl_breakdown"],
-        "distributed": ["nccl_breakdown"],
-        "multi-gpu": ["nccl_breakdown"],
-        "nvtx": ["nvtx_kernel_map"],
+        "stall": ["gpu_idle_gaps", "nccl_anomaly"],
+        "memory": ["memory_transfers", "memory_bandwidth"],
+        "transfer": ["memory_transfers", "memory_bandwidth"],
+        "h2d": ["memory_transfers", "memory_bandwidth"],
+        "copy": ["memory_transfers", "memory_bandwidth"],
+        "bandwidth": ["memory_bandwidth"],
+        "nccl": ["nccl_breakdown", "overlap_breakdown", "nccl_anomaly"],
+        "allreduce": ["nccl_breakdown", "nccl_anomaly"],
+        "collective": ["nccl_breakdown", "nccl_anomaly"],
+        "distributed": ["nccl_breakdown", "overlap_breakdown", "nccl_anomaly"],
+        "multi-gpu": ["nccl_breakdown", "overlap_breakdown"],
+        "anomaly": ["nccl_anomaly"],
+        "outlier": ["nccl_anomaly"],
+        "overlap": ["overlap_breakdown"],
+        "nvtx": ["nvtx_kernel_map", "nvtx_layer_breakdown"],
         "source": ["nvtx_kernel_map"],
         "attribution": ["nvtx_kernel_map"],
         "mapping": ["nvtx_kernel_map"],
-        "launch": ["kernel_launch_overhead"],
+        "layer": ["nvtx_layer_breakdown"],
+        "launch": ["kernel_launch_overhead", "kernel_launch_pattern"],
         "overhead": ["kernel_launch_overhead"],
-        "cpu": ["thread_utilization"],
+        "dispatch": ["kernel_launch_pattern"],
+        "pattern": ["kernel_launch_pattern"],
+        "burst": ["kernel_launch_pattern"],
+        "stream": ["stream_concurrency"],
+        "concurrency": ["stream_concurrency"],
+        "parallel": ["stream_concurrency"],
+        "serial": ["stream_concurrency"],
+        "cpu": ["thread_utilization", "cpu_gpu_pipeline"],
         "thread": ["thread_utilization"],
-        "utilization": ["thread_utilization"],
+        "utilization": ["thread_utilization", "stream_concurrency"],
+        "pipeline": ["cpu_gpu_pipeline"],
+        "starvation": ["cpu_gpu_pipeline"],
+        "queue": ["cpu_gpu_pipeline"],
         "schema": ["schema_inspect"],
         "table": ["schema_inspect"],
-        "mfu": ["top_kernels"],
-        "flops": ["top_kernels"],
+        "mfu": ["region_mfu", "theoretical_flops"],
+        "flops": ["theoretical_flops"],
+        "efficiency": ["region_mfu"],
+        "iteration": ["iteration_timing"],
+        "iter": ["iteration_timing"],
+        "training": ["iteration_timing"],
+        "step": ["iteration_timing"],
+        "diagnosis": ["root_cause_matcher"],
+        "root-cause": ["root_cause_matcher"],
+        "why": ["root_cause_matcher"],
+        "speedup": ["speedup_estimator"],
+        "estimate": ["speedup_estimator"],
+        "projection": ["speedup_estimator"],
     }
 
     def __init__(self, profile_path: str):
@@ -65,35 +91,61 @@ class Agent:
         """Run a full auto-analysis of the profile.
 
         Executes the core skills in order:
-        1. schema_inspect — understand available data
-        2. top_kernels — identify hotspots
-        3. gpu_idle_gaps — find pipeline bubbles
-        4. memory_transfers — check data movement
-        5. nccl_breakdown — check collective overhead (if present)
-        6. kernel_launch_overhead — check dispatch latency
+        1. top_kernels — identify hotspots
+        2. gpu_idle_gaps — find pipeline bubbles
+        3. memory_transfers — check data movement
+        4. nccl_breakdown — check collective overhead (if present)
+        5. kernel_launch_overhead — check dispatch latency
+        6. overlap_breakdown — compute/NCCL overlap analysis
+        7. iteration_timing — per-iteration timing
+        8. nvtx_layer_breakdown — per-NVTX-region GPU time
 
         Returns:
-            Formatted multi-section report.
+            Formatted multi-section report with optional AI synthesis.
         """
         sections = []
         sections.append("═══ nsys-ai Auto-Analysis Report ═══\n")
+
+        # Structured evidence for LLM (JSON-serializable)
+        evidence = {}
 
         # Always run these core skills
         core_skills = [
             "top_kernels",
             "gpu_idle_gaps",
             "memory_transfers",
+            "memory_bandwidth",
             "nccl_breakdown",
+            "nccl_anomaly",
             "kernel_launch_overhead",
+            "kernel_launch_pattern",
+            "stream_concurrency",
+            "overlap_breakdown",
+            "iteration_timing",
+            "nvtx_layer_breakdown",
         ]
 
         for skill_name in core_skills:
             try:
-                result = run_skill(skill_name, self.conn)
-                sections.append(result)
+                skill = get_skill(skill_name)
+                if skill is None:
+                    continue
+                rows = skill.execute(self.conn)
+                evidence[skill_name] = rows
+                text = skill.run(self.conn)
+                sections.append(text)
                 sections.append("")
             except Exception as e:
                 sections.append(f"({skill_name}: skipped — {e})\n")
+
+        # LLM synthesis with structured JSON evidence
+        llm_answer = self._try_llm_synthesis(
+            "Provide a comprehensive GPU performance analysis based on the profile data.",
+            evidence,
+        )
+        if llm_answer:
+            sections.append("\n── AI Analysis ──")
+            sections.append(llm_answer)
 
         sections.append("═══ End of Report ═══")
         return "\n".join(sections)
@@ -104,8 +156,8 @@ class Agent:
         Without LLM: uses keyword matching to select relevant skills,
         runs them, and presents the raw output.
 
-        With [agent] extra: delegates to LLM with the full system prompt
-        and skill results as context.
+        With [agent] extra: delegates to LLM with structured JSON evidence
+        from skill results for mathematical reasoning.
 
         Args:
             question: Natural language question (e.g. "why is iteration 3 slow?")
@@ -121,17 +173,23 @@ class Agent:
             selected = ["top_kernels", "gpu_idle_gaps"]
 
         sections = [f"Question: {question}\n"]
+        evidence = {}
 
         for skill_name in selected:
             try:
-                result = run_skill(skill_name, self.conn)
-                sections.append(result)
+                skill = get_skill(skill_name)
+                if skill is None:
+                    continue
+                rows = skill.execute(self.conn)
+                evidence[skill_name] = rows
+                text = skill.run(self.conn)
+                sections.append(text)
                 sections.append("")
             except Exception as e:
                 sections.append(f"({skill_name}: skipped — {e})\n")
 
-        # Try LLM synthesis if available
-        llm_answer = self._try_llm_synthesis(question, sections)
+        # Try LLM synthesis with structured evidence
+        llm_answer = self._try_llm_synthesis(question, evidence)
         if llm_answer:
             sections.append("\n── AI Analysis ──")
             sections.append(llm_answer)
@@ -151,14 +209,24 @@ class Agent:
                 selected.update(skill_names)
         return sorted(selected)
 
-    def _try_llm_synthesis(self, question: str, evidence_sections: list[str]) -> str | None:
-        """Try to use an LLM to synthesize an answer. Returns None if no LLM available."""
+    def _try_llm_synthesis(
+        self, question: str, evidence: dict[str, list[dict]]
+    ) -> str | None:
+        """Try to use an LLM to synthesize an answer from structured evidence.
+
+        Args:
+            question: The question to answer.
+            evidence: Dict mapping skill names to their JSON-serializable results.
+
+        Returns None if no LLM available.
+        """
+        import json
         import os
 
-        evidence = "\n".join(evidence_sections)
+        evidence_json = json.dumps(evidence, indent=2, default=str)
         user_msg = (
-            f"Here is data from an Nsight Systems profile analysis:\n\n"
-            f"{evidence}\n\n"
+            f"Profile analysis data (structured JSON):\n"
+            f"```json\n{evidence_json}\n```\n\n"
             f"Based on this data, answer the following question:\n{question}"
         )
 
@@ -219,4 +287,3 @@ class Agent:
             return message.content[0].text
         except Exception as e:
             return f"(LLM synthesis failed: {e})"
-

@@ -36,7 +36,7 @@ SELECT s.value AS kernel_name,
        ROUND((k.[end] - k.start) / 1e6, 3) AS kernel_ms,
        ROUND((k.start - r.start) / 1e3, 1) AS overhead_us
 FROM CUPTI_ACTIVITY_KIND_RUNTIME r
-JOIN CUPTI_ACTIVITY_KIND_KERNEL k ON r.correlationId = k.correlationId
+JOIN {kernel_table} k ON r.correlationId = k.correlationId
 JOIN StringIds s ON k.shortName = s.id
 WHERE 1=1 {trim_clause}
 ORDER BY overhead_us DESC

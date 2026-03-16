@@ -141,15 +141,22 @@ def auto_commentary(summary: dict) -> str:
             f"of compute time ({top[0]['total_ms']:.0f}ms across {top[0]['count']} calls)."
         )
 
-    # Compute vs NCCL split from streams
-    nccl_ms = sum(s["total_ms"] for sid, s in summary["streams"].items() if sid in (56,))
-    compute_ms = sum(s["total_ms"] for sid, s in summary["streams"].items() if sid not in (56,))
-    total_stream_ms = nccl_ms + compute_ms
+    # Compute vs NCCL split — detect by kernel name, not stream ID
+    nccl_ms = 0.0
+    compute_ms_total = 0.0
+    for k in top:
+        name_lower = (k["name"] or "").lower()
+        ms = k["total_ms"]
+        if "nccl" in name_lower:
+            nccl_ms += ms
+        else:
+            compute_ms_total += ms
+    total_stream_ms = nccl_ms + compute_ms_total
     if total_stream_ms > 0 and nccl_ms > 0:
         nccl_pct = 100 * nccl_ms / total_stream_ms
         sentences.append(
             f"NCCL collectives account for {nccl_pct:.0f}% of kernel time "
-            f"({nccl_ms:.0f}ms), with compute at {compute_ms:.0f}ms."
+            f"({nccl_ms:.0f}ms), with compute at {compute_ms_total:.0f}ms."
         )
 
     if t["idle_ms"] > 10:

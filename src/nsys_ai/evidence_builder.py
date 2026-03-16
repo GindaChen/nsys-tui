@@ -39,6 +39,8 @@ class EvidenceBuilder:
         findings += self._gpu_idle_gaps()
         findings += self._nccl_stalls()
         findings += self._kernel_hotspots()
+        findings += self._overlap_ratio()
+        findings += self._memory_anomalies()
         return EvidenceReport(
             title="Auto-Analysis",
             profile_path=getattr(self.prof, "path", ""),
@@ -48,6 +50,57 @@ class EvidenceBuilder:
     # ------------------------------------------------------------------
     # Analyzers
     # ------------------------------------------------------------------
+
+    def _overlap_ratio(self) -> list[Finding]:
+        """Flag poor compute/NCCL overlap and communication dominance."""
+        from .overlap import overlap_analysis
+
+        result = overlap_analysis(self.prof, self.device, self.trim)
+        if "error" in result:
+            return []
+
+        findings = []
+        nccl_ms = result.get("nccl_only_ms", 0) + result.get("overlap_ms", 0)
+        compute_ms = result.get("compute_only_ms", 0)
+        overlap_pct = result.get("overlap_pct", 0)
+        total_ms = result.get("total_ms", 1)
+
+        # Low overlap: NCCL not well hidden behind compute
+        if nccl_ms > 0 and overlap_pct < 30:
+            findings.append(Finding(
+                type="region",
+                label=f"Low Compute/NCCL Overlap ({overlap_pct}%)",
+                start_ns=self.trim[0],
+                end_ns=self.trim[1],
+                gpu_id=self.device,
+                severity="warning",
+                note=(
+                    f"Only {overlap_pct}% of NCCL time overlaps with compute. "
+                    f"NCCL-only: {result['nccl_only_ms']:.1f}ms out of "
+                    f"{total_ms:.1f}ms total span."
+                ),
+            ))
+
+        # Communication dominated: NCCL > compute
+        if nccl_ms > 0 and compute_ms > 0:
+            ratio = compute_ms / nccl_ms
+            if ratio < 0.5:
+                findings.append(Finding(
+                    type="region",
+                    label=f"Communication Dominated (ratio={ratio:.2f})",
+                    start_ns=self.trim[0],
+                    end_ns=self.trim[1],
+                    gpu_id=self.device,
+                    severity="critical",
+                    note=(
+                        f"Compute/Communication ratio is {ratio:.2f} "
+                        f"(healthy > 2.0). Compute: {compute_ms:.1f}ms, "
+                        f"NCCL: {nccl_ms:.1f}ms. Consider reducing "
+                        f"tensor parallelism degree."
+                    ),
+                ))
+
+        return findings
 
     def _slow_iterations(self) -> list[Finding]:
         """Iterations with duration >1.5× median → region findings."""
@@ -179,3 +232,39 @@ LIMIT ?"""
             )
             for r in rows
         ]
+
+    def _memory_anomalies(
+        self, min_bytes: int = 10_000_000, top_n: int = 5
+    ) -> list[Finding]:
+        """Flag large memory transfers that may stall the GPU."""
+        if "CUPTI_ACTIVITY_KIND_MEMCPY" not in self.prof.schema.tables:
+            return []
+        sql = """\
+SELECT copyKind, bytes, start, [end], (end - start) AS dur_ns
+FROM CUPTI_ACTIVITY_KIND_MEMCPY
+WHERE bytes > ? AND [end] >= ? AND start <= ?
+ORDER BY dur_ns DESC
+LIMIT ?"""
+        kind_names = {1: "H2D", 2: "D2H", 3: "D2D", 8: "P2P"}
+        with self.prof._lock:
+            rows = self.prof.conn.execute(
+                sql, (min_bytes, self.trim[0], self.trim[1], top_n)
+            ).fetchall()
+        findings = []
+        for r in rows:
+            kind = kind_names.get(r["copyKind"], f"kind{r['copyKind']}")
+            mb = r["bytes"] / 1e6
+            dur_ms = r["dur_ns"] / 1e6
+            findings.append(Finding(
+                type="highlight",
+                label=f"Large {kind} Transfer ({mb:.1f}MB)",
+                start_ns=int(r["start"]),
+                end_ns=int(r["end"]),
+                gpu_id=self.device,
+                severity="warning" if dur_ms > 1.0 else "info",
+                note=(
+                    f"{kind}: {mb:.1f}MB in {dur_ms:.2f}ms "
+                    f"({r['bytes'] / max(r['dur_ns'], 1) * 1e9 / 1e9:.1f}GB/s)"
+                ),
+            ))
+        return findings
