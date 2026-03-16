@@ -245,7 +245,7 @@ FROM CUPTI_ACTIVITY_KIND_MEMCPY
 WHERE deviceId = ? AND bytes > ? AND [end] >= ? AND start <= ?
 ORDER BY dur_ns DESC
 LIMIT ?"""
-        kind_names = {1: "H2D", 2: "D2H", 3: "D2D", 8: "P2P"}
+        kind_names = {1: "H2D", 2: "D2H", 8: "D2D", 10: "P2P"}
         with self.prof._lock:
             rows = self.prof.conn.execute(
                 sql, (self.device, min_bytes, self.trim[0], self.trim[1], top_n)

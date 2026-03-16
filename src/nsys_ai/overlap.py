@@ -174,9 +174,10 @@ def detect_iterations(
 
     # Filter to primary thread's top-level iterations
     # Use COALESCE to handle newer schemas where text is NULL and textId is used
-    has_textid = prof.conn.execute(
-        f"SELECT COUNT(*) FROM pragma_table_info('{nvtx_table}') WHERE name='textId'"
-    ).fetchone()[0] > 0
+    with prof._lock:
+        has_textid = prof.conn.execute(
+            f"SELECT COUNT(*) FROM pragma_table_info('{nvtx_table}') WHERE name='textId'"
+        ).fetchone()[0] > 0
 
     if has_textid:
         text_expr = "COALESCE(n.text, s.value)"
@@ -185,16 +186,17 @@ def detect_iterations(
         text_expr = "n.text"
         text_join = ""
 
-    pri_nvtx = prof.conn.execute(
-        f"""
-        SELECT {text_expr} AS text, n.start, n.[end] FROM {nvtx_table} n
-        {text_join}
-        WHERE {text_expr} LIKE ? AND n.[end] > n.start AND n.globalTid = ?
-          AND n.start >= ? AND n.start <= ?
-        ORDER BY n.start
-    """,
-        (f"%{marker}%", primary_tid, time_range[0] - pad, time_range[1]),
-    ).fetchall()
+    with prof._lock:
+        pri_nvtx = prof.conn.execute(
+            f"""
+            SELECT {text_expr} AS text, n.start, n.[end] FROM {nvtx_table} n
+            {text_join}
+            WHERE {text_expr} LIKE ? AND n.[end] > n.start AND n.globalTid = ?
+              AND n.start >= ? AND n.start <= ?
+            ORDER BY n.start
+        """,
+            (f"%{marker}%", primary_tid, time_range[0] - pad, time_range[1]),
+        ).fetchall()
 
     # Filter to non-overlapping (top-level only)
     iterations = []
@@ -208,13 +210,14 @@ def detect_iterations(
         return []
 
     # For each iteration, count kernels and compute GPU time
-    rt_all = prof.conn.execute(
-        f"""
-        SELECT start, [end], correlationId FROM {runtime_table}
-        WHERE globalTid = ? ORDER BY start
-    """,
-        (primary_tid,),
-    ).fetchall()
+    with prof._lock:
+        rt_all = prof.conn.execute(
+            f"""
+            SELECT start, [end], correlationId FROM {runtime_table}
+            WHERE globalTid = ? ORDER BY start
+        """,
+            (primary_tid,),
+        ).fetchall()
 
     results = []
     for i, it in enumerate(iterations):

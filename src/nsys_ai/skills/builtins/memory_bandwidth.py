@@ -15,9 +15,9 @@ _COPY_KIND_NAMES = {
     0: "Unknown",
     1: "H2D",
     2: "D2H",
-    3: "D2D",
     4: "H2H",
-    8: "P2P",
+    8: "D2D",
+    10: "P2P",
 }
 
 
@@ -36,8 +36,7 @@ WITH ranked AS (
     SELECT
         copyKind,
         bytes,
-        (k.[end] - k.start) AS dur_ns,
-        ROW_NUMBER() OVER (PARTITION BY copyKind ORDER BY bytes DESC) AS rn
+        (k.[end] - k.start) AS dur_ns
     FROM CUPTI_ACTIVITY_KIND_MEMCPY k
     WHERE 1=1
         {trim_clause}
@@ -55,10 +54,18 @@ SELECT
         THEN ROUND(SUM(r.bytes) / (SUM(r.dur_ns) / 1e9) / 1e9, 2)
         ELSE 0
     END AS avg_bandwidth_gbps,
-    ROUND(MAX(CASE WHEN r.rn = 1 AND r.dur_ns > 0
-        THEN r.bytes / (r.dur_ns / 1e9) / 1e9
-        ELSE 0
-    END), 2) AS peak_bandwidth_gbps
+    COALESCE(
+        ROUND(
+            MAX(
+                CASE
+                    WHEN r.dur_ns > 0
+                    THEN r.bytes / (r.dur_ns / 1e9) / 1e9
+                END
+            ),
+            2
+        ),
+        0
+    ) AS peak_bandwidth_gbps
 FROM ranked r
 GROUP BY r.copyKind
 ORDER BY total_mb DESC""",
