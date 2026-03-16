@@ -1132,8 +1132,8 @@ def stream_agent_loop(
 def chat_completion_stream(body_bytes: bytes):
     """Generator yielding SSE bytes for the streaming web endpoint.
 
-    Always delegates to :func:`stream_agent_loop`.  Uses *profile_path* when
-    ``NSYS_AI_DB_AGENT`` environment variable is set.
+    Always delegates to :func:`stream_agent_loop`.  The *profile_path* field,
+    when provided in the request payload, is passed through directly.
     """
     try:
         payload = json.loads(body_bytes.decode("utf-8"))

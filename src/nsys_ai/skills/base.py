@@ -16,14 +16,50 @@ _indexed_connections: set[int] = set()
 
 # Indexes to create on Nsight SQLite profiles for skill query performance.
 # Uses ``_nsysai_`` prefix to avoid conflicts with upstream tables.
-_INDEX_STMTS = [
-    "CREATE INDEX IF NOT EXISTS _nsysai_kernel_start ON CUPTI_ACTIVITY_KIND_KERNEL(start)",
-    "CREATE INDEX IF NOT EXISTS _nsysai_kernel_corr  ON CUPTI_ACTIVITY_KIND_KERNEL(correlationId)",
-    "CREATE INDEX IF NOT EXISTS _nsysai_runtime_corr ON CUPTI_ACTIVITY_KIND_RUNTIME(correlationId)",
-    "CREATE INDEX IF NOT EXISTS _nsysai_runtime_tid  ON CUPTI_ACTIVITY_KIND_RUNTIME(globalTid, start)",
-    "CREATE INDEX IF NOT EXISTS _nsysai_nvtx_start   ON NVTX_EVENTS(start)",
-    "CREATE INDEX IF NOT EXISTS _nsysai_nvtx_tid     ON NVTX_EVENTS(globalTid, start)",
-]
+# Table names can vary between Nsight versions (e.g. *_KERNEL_V2/V3), so we
+# resolve the actual table names from sqlite_master at runtime instead of
+# hard-coding them here.
+
+
+def _resolve_activity_tables(conn: sqlite3.Connection) -> dict[str, str]:
+    """Resolve Nsight activity table names (kernel/runtime/NVTX) from sqlite_master.
+
+    Nsight may emit versioned table names such as
+    CUPTI_ACTIVITY_KIND_KERNEL_V2.
+    This helper finds the first matching table for each logical kind.
+    """
+    try:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+    except Exception:
+        return {}
+
+    def _find_by_prefix(prefix: str) -> str | None:
+        if prefix in tables:
+            return prefix
+        candidates = sorted(t for t in tables if t.startswith(prefix))
+        return candidates[0] if candidates else None
+
+    kernel_table = _find_by_prefix("CUPTI_ACTIVITY_KIND_KERNEL")
+    runtime_table = _find_by_prefix("CUPTI_ACTIVITY_KIND_RUNTIME")
+    if "NVTX_EVENTS" in tables:
+        nvtx_table = "NVTX_EVENTS"
+    else:
+        nvtx_table = _find_by_prefix("NVTX_EVENTS")
+
+    resolved: dict[str, str] = {}
+    if kernel_table:
+        resolved["kernel"] = kernel_table
+    if runtime_table:
+        resolved["runtime"] = runtime_table
+    if nvtx_table:
+        resolved["nvtx"] = nvtx_table
+
+    return resolved
 
 
 def ensure_indexes(conn: sqlite3.Connection) -> None:
@@ -38,7 +74,38 @@ def ensure_indexes(conn: sqlite3.Connection) -> None:
     if conn_id in _indexed_connections:
         return
 
-    for stmt in _INDEX_STMTS:
+    tables = _resolve_activity_tables(conn)
+
+    index_stmts: list[str] = []
+
+    kernel_table = tables.get("kernel")
+    if kernel_table:
+        index_stmts.append(
+            f"CREATE INDEX IF NOT EXISTS _nsysai_kernel_start ON {kernel_table}(start)"
+        )
+        index_stmts.append(
+            f"CREATE INDEX IF NOT EXISTS _nsysai_kernel_corr  ON {kernel_table}(correlationId)"
+        )
+
+    runtime_table = tables.get("runtime")
+    if runtime_table:
+        index_stmts.append(
+            f"CREATE INDEX IF NOT EXISTS _nsysai_runtime_corr ON {runtime_table}(correlationId)"
+        )
+        index_stmts.append(
+            f"CREATE INDEX IF NOT EXISTS _nsysai_runtime_tid  ON {runtime_table}(globalTid, start)"
+        )
+
+    nvtx_table = tables.get("nvtx")
+    if nvtx_table:
+        index_stmts.append(
+            f"CREATE INDEX IF NOT EXISTS _nsysai_nvtx_start   ON {nvtx_table}(start)"
+        )
+        index_stmts.append(
+            f"CREATE INDEX IF NOT EXISTS _nsysai_nvtx_tid     ON {nvtx_table}(globalTid, start)"
+        )
+
+    for stmt in index_stmts:
         try:
             conn.execute(stmt)
         except sqlite3.OperationalError:

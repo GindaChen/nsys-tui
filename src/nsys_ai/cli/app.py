@@ -686,7 +686,19 @@ def _cmd_skill(args, _profile):
         tmp_dst = dst_dir / src.name
         shutil.copy2(src, tmp_dst)
         # Load the skill to determine its canonical name.
-        skill = load_skill_from_markdown(str(tmp_dst))
+        try:
+            skill = load_skill_from_markdown(str(tmp_dst))
+        except ValueError as exc:
+            # Parsing failed: clean up the temporary copy and report a clear error.
+            print(
+                f"Error: failed to parse skill markdown '{src}': {exc}",
+                file=sys.stderr,
+            )
+            try:
+                tmp_dst.unlink()
+            except OSError:
+                pass
+            sys.exit(1)
         normalized_dst = dst_dir / f"{skill.name}.md"
         # If the canonical filename differs, rename the copied file,
         # but avoid overwriting an existing skill file.

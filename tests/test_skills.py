@@ -429,6 +429,7 @@ def test_skill_run_cli_trim_arg():
     _build_parser()  # verify no import/construction error
     # This replaces _register_legacy_commands; make sure we can parse
     # Build a minimal parse to verify --trim is accepted
+    parsed = False
     try:
         from nsys_ai.cli.app import _build_legacy_parser
 
@@ -436,6 +437,12 @@ def test_skill_run_cli_trim_arg():
         args = lp.parse_args(["skill", "run", "top_kernels", "test.sqlite", "--trim", "1.0", "3.0"])
         assert args.trim == [1.0, 3.0]
         assert args.skill_name == "top_kernels"
+        parsed = True
     except (SystemExit, AttributeError):
-        # Fall back to the public parser if legacy isn't available
+        # Legacy parser not available — fall back to the public parser
         pass
+
+    if not parsed:
+        # Verify at least the public parser can be constructed
+        parser = _build_parser()
+        assert parser is not None
