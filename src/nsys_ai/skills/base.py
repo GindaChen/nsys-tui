@@ -243,6 +243,23 @@ class Skill:
             "CUPTI_ACTIVITY_KIND_MEMCPY",
         )
 
+        # NVTX text resolution: handle both legacy (text column only)
+        # and modern schemas (textId → StringIds lookup).
+        nvtx_tbl = resolved.get("nvtx_table", "NVTX_EVENTS")
+        if "{nvtx_text_expr}" in self.sql or "{nvtx_text_join}" in self.sql:
+            try:
+                has_textid = conn.execute(
+                    f"SELECT COUNT(*) FROM pragma_table_info('{nvtx_tbl}') WHERE name='textId'"
+                ).fetchone()[0] > 0
+            except Exception:
+                has_textid = False
+            if has_textid:
+                resolved.setdefault("nvtx_text_expr", "COALESCE(n.text, s2.value)")
+                resolved.setdefault("nvtx_text_join", "LEFT JOIN StringIds s2 ON n.textId = s2.id")
+            else:
+                resolved.setdefault("nvtx_text_expr", "n.text")
+                resolved.setdefault("nvtx_text_join", "")
+
         sql = self.sql.format(**resolved) if resolved else self.sql
         cursor = conn.execute(sql)
         columns = [desc[0] for desc in cursor.description] if cursor.description else []

@@ -32,7 +32,7 @@ SKILL = Skill(
     ),
     category="nvtx",
     sql="""\
-SELECT COALESCE(n.text, s2.value) AS nvtx_text,
+SELECT {nvtx_text_expr} AS nvtx_text,
        s.value AS kernel_name,
        ROUND(k.start / 1e6, 3) AS start_ms,
        ROUND(k.[end] / 1e6, 3) AS end_ms
@@ -45,7 +45,7 @@ JOIN {runtime_table} r
 JOIN {kernel_table} k
   ON r.correlationId = k.correlationId
 JOIN StringIds s ON k.shortName = s.id
-LEFT JOIN StringIds s2 ON n.textId = s2.id
+{nvtx_text_join}
 WHERE 1=1 {trim_clause}
 ORDER BY k.start
 LIMIT {limit}""",

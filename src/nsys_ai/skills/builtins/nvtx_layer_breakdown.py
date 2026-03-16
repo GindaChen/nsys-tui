@@ -42,7 +42,7 @@ SKILL = Skill(
     category="nvtx",
     sql="""\
 SELECT
-    COALESCE(n.text, s2.value) AS nvtx_region,
+    {nvtx_text_expr} AS nvtx_region,
     COUNT(DISTINCT k.correlationId) AS kernel_count,
     ROUND(SUM(k.[end] - k.start) / 1e6, 2) AS total_gpu_ms,
     ROUND(AVG(k.[end] - k.start) / 1e6, 3) AS avg_kernel_ms,
@@ -53,11 +53,11 @@ JOIN {runtime_table} r
     AND r.start >= n.start AND r.[end] <= n.[end]
 JOIN {kernel_table} k
     ON k.correlationId = r.correlationId
-LEFT JOIN StringIds s2 ON n.textId = s2.id
+{nvtx_text_join}
 WHERE n.[end] > n.start
-    AND COALESCE(n.text, s2.value) IS NOT NULL
+    AND {nvtx_text_expr} IS NOT NULL
     {trim_clause}
-GROUP BY COALESCE(n.text, s2.value)
+GROUP BY {nvtx_text_expr}
 ORDER BY total_gpu_ms DESC
 LIMIT {limit}""",
     params=[SkillParam("limit", "Max number of NVTX regions to return", "int", False, 20)],

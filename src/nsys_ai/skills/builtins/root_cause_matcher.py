@@ -22,8 +22,8 @@ def _execute(conn, **kwargs):
 
     # Gather evidence from skills (forward trim kwargs)
 
-    # Top kernels
-    top_kernels_data = _safe_execute("top_kernels", conn, **kwargs)
+    # Top kernels (request a larger slice to reduce bias in hotspot detection)
+    top_kernels_data = _safe_execute("top_kernels", conn, limit=1000, **kwargs)
     # GPU idle gaps
     idle_gaps_data = _safe_execute("gpu_idle_gaps", conn, **kwargs)
     # Overlap
@@ -73,7 +73,7 @@ def _execute(conn, **kwargs):
                 })
 
     # --- Pattern 4: Excessive H2D Transfers ---
-    mem_data = _safe_execute("memory_bandwidth", conn)
+    mem_data = _safe_execute("memory_bandwidth", conn, **kwargs)
     if mem_data:
         h2d = [r for r in mem_data if r.get("copyKind") == 1]
         if h2d:
@@ -127,7 +127,8 @@ def _execute(conn, **kwargs):
                     "severity": "info",
                     "evidence": (
                         f"'{top_k.get('kernel_name', '?')}' accounts for {pct:.0f}% "
-                        f"of GPU time ({top_k.get('total_ms', 0):.1f}ms)"
+                        f"of time in the profiled top kernels "
+                        f"({top_k.get('total_ms', 0):.1f}ms)"
                     ),
                     "recommendation": (
                         "Ensure shapes are multiples of 128 (H100) / 64 (A100), "
