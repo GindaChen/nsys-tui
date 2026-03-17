@@ -17,9 +17,9 @@ def _execute(conn, **kwargs):
 
     rows = attribute_kernels_to_nvtx(conn, sqlite_path=sqlite_path, trim=trim)
 
-    # Sort by kernel start and apply limit
-    rows.sort(key=lambda r: r["k_start"])
-    rows = rows[:limit]
+    # Select the earliest kernels by start time without fully sorting
+    import heapq
+    rows = heapq.nsmallest(limit, rows, key=lambda r: r["k_start"])
 
     # Format output to match expected schema
     return [

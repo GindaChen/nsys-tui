@@ -29,23 +29,32 @@ def _execute(conn, **kwargs):
     if not rows:
         return []
 
-    # Python GROUP BY on nvtx_text
-    groups: dict[str, list[int]] = defaultdict(list)
+    # Python GROUP BY on nvtx_text, with incremental aggregation to avoid
+    # storing all individual kernel durations in memory.
+    groups: dict[str, dict[str, int]] = defaultdict(lambda: {"total_ns": 0, "count": 0, "max_ns": 0})
     for r in rows:
         text = r["nvtx_text"]
-        if text:
-            groups[text].append(r["k_dur_ns"])
+        if not text:
+            continue
+        dur_ns = r["k_dur_ns"]
+        stats = groups[text]
+        stats["total_ns"] += dur_ns
+        stats["count"] += 1
+        if dur_ns > stats["max_ns"]:
+            stats["max_ns"] = dur_ns
 
     # Build aggregated results
     results = []
-    for nvtx_text, durs in groups.items():
-        total_ns = sum(durs)
+    for nvtx_text, stats in groups.items():
+        total_ns = stats["total_ns"]
+        count = stats["count"]
+        max_ns = stats["max_ns"]
         results.append({
             "nvtx_region": nvtx_text,
-            "kernel_count": len(durs),
+            "kernel_count": count,
             "total_gpu_ms": round(total_ns / 1e6, 2),
-            "avg_kernel_ms": round(total_ns / len(durs) / 1e6, 3),
-            "max_kernel_ms": round(max(durs) / 1e6, 3),
+            "avg_kernel_ms": round(total_ns / count / 1e6, 3),
+            "max_kernel_ms": round(max_ns / 1e6, 3),
         })
 
     # Sort by total GPU time descending, apply limit

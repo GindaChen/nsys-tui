@@ -12,7 +12,7 @@ Provides efficient NVTX-to-kernel mapping using a two-tier strategy:
    runtime call.  Complexity: O(N+M) after sorting.
 """
 
-import bisect
+
 import csv
 import io
 import os
@@ -80,9 +80,9 @@ def _run_nsys_recipe(nsys_rep_path: str, trim: tuple[int, int] | None = None) ->
         except (ValueError, TypeError):
             continue
 
-        # Apply trim if specified
+        # Apply trim if specified: containment semantics (same as Tier 2)
         if trim:
-            if end_ns < trim[0] or start_ns > trim[1]:
+            if start_ns < trim[0] or end_ns > trim[1]:
                 continue
 
         rows.append({
@@ -104,12 +104,17 @@ def _sort_merge_attribute(
     conn: sqlite3.Connection,
     trim: tuple[int, int] | None = None,
 ) -> list[dict]:
-    """O(N+M) sort-merge sweep to attribute kernels to NVTX ranges.
+    """Sort-merge style attribute of kernels to NVTX ranges.
 
-    Algorithm:
-    1. Load Kernel→Runtime via correlationId (fast indexed join)
-    2. Load NVTX ranges sorted by (globalTid, start)
-    3. Per-thread: two-pointer sweep with stack for nesting
+    Algorithm (high level):
+    1. Load Kernel→Runtime via correlationId (fast indexed join).
+    2. Load NVTX ranges sorted by (globalTid, start).
+    3. For each thread, do a single forward sweep using a stack of
+       "currently open" NVTX ranges.  Runtime calls are matched to
+       the top of the stack (innermost enclosing NVTX).
+
+    Overall complexity is O(N+M) per thread (each NVTX is pushed and
+    popped at most once; each runtime call is processed once).
     """
     # Detect versioned table names
     all_tables = [
@@ -223,22 +228,32 @@ def _sort_merge_attribute(
         if tid not in nvtx_by_tid:
             continue
 
-        nvtx_list = nvtx_by_tid[tid]  # already sorted by start
-        nvtx_starts = [n[0] for n in nvtx_list]
+        # NVTX ranges for this thread, sorted by start time
+        nvtx_list = nvtx_by_tid[tid]
+
+        # Ensure runtime records for this thread are processed in start-time order
+        kr_by_tid[tid].sort(key=lambda x: x[0])
+
+        nvtx_idx = 0
+        open_stack: list[tuple[int, int, str]] = []  # (start, end, text)
 
         for r_start, r_end, k_start, k_end, short_name in kr_by_tid[tid]:
-            # Binary search: find rightmost NVTX whose start <= r_start
-            idx = bisect.bisect_right(nvtx_starts, r_start) - 1
+            # Advance NVTX pointer, pushing any ranges that have opened by r_start
+            while nvtx_idx < len(nvtx_list) and nvtx_list[nvtx_idx][0] <= r_start:
+                open_stack.append(nvtx_list[nvtx_idx])
+                nvtx_idx += 1
 
-            # Walk backward to find the innermost enclosing NVTX
+            # Pop NVTX ranges that have already closed before this runtime starts
+            while open_stack and open_stack[-1][1] < r_start:
+                open_stack.pop()
+
+            # Find innermost enclosing NVTX (scan stack from top)
             best_nvtx = None
-            while idx >= 0:
-                ns, ne, nt = nvtx_list[idx]
+            for i in range(len(open_stack) - 1, -1, -1):
+                ns, ne, nt = open_stack[i]
                 if ns <= r_start and ne >= r_end:
-                    # This NVTX encloses the runtime call
                     best_nvtx = nt
                     break
-                idx -= 1
 
             if best_nvtx is not None:
                 results.append({
