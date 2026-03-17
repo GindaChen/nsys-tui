@@ -586,3 +586,102 @@ def test_execute_fn_skill_json_serializable():
     parsed = json.loads(text)
     assert parsed[0]["metric"] == 42.0
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Root cause matcher: anti-pattern integration tests
+# ---------------------------------------------------------------------------
+
+
+def test_root_cause_no_id_field(minimal_nsys_conn):
+    """Findings should NOT contain an 'id' field — pattern name is the identifier."""
+    from nsys_ai.skills.registry import get_skill
+
+    skill = get_skill("root_cause_matcher")
+    rows = skill.execute(minimal_nsys_conn)
+    assert isinstance(rows, list)
+    for finding in rows:
+        assert "id" not in finding, f"Finding should not have 'id': {finding}"
+        assert "pattern" in finding
+        assert "severity" in finding
+        assert "evidence" in finding
+        assert "recommendation" in finding
+
+
+def test_root_cause_finds_sync_apis(minimal_nsys_conn):
+    """Should detect Excessive Synchronization from seed data.
+
+    Seed has 2 cudaDeviceSynchronize calls totalling 16ms,
+    while total GPU kernel time is ~4ms → sync is >100% of GPU time.
+    """
+    from nsys_ai.skills.registry import get_skill
+
+    skill = get_skill("root_cause_matcher")
+    rows = skill.execute(minimal_nsys_conn)
+    patterns = [r["pattern"] for r in rows]
+    assert "Excessive Synchronization" in patterns
+    sync_finding = next(r for r in rows if r["pattern"] == "Excessive Synchronization")
+    assert "cudaDeviceSynchronize" in sync_finding["evidence"]
+    assert sync_finding["severity"] in ("warning", "critical")
+
+
+def test_root_cause_finds_sync_memcpy(minimal_nsys_conn):
+    """Should detect Synchronous Memcpy from seed data.
+
+    Seed has 1 cudaMemcpy call correlated with a memcpy entry.
+    """
+    from nsys_ai.skills.registry import get_skill
+
+    skill = get_skill("root_cause_matcher")
+    rows = skill.execute(minimal_nsys_conn)
+    patterns = [r["pattern"] for r in rows]
+    assert "Synchronous Memcpy" in patterns
+
+
+def test_root_cause_finds_pageable_memcpy(minimal_nsys_conn):
+    """Should detect Pageable Memory in seed data.
+
+    Seed has a memcpy entry with srcKind=1 (pageable).
+    """
+    from nsys_ai.skills.registry import get_skill
+
+    skill = get_skill("root_cause_matcher")
+    rows = skill.execute(minimal_nsys_conn)
+    patterns = [r["pattern"] for r in rows]
+    assert "Pageable Memory in Async Memcpy" in patterns
+
+
+def test_root_cause_finds_sync_memset(minimal_nsys_conn):
+    """Should detect Synchronous Memset from seed data.
+
+    Seed has 1 cudaMemset call correlated with a memset entry.
+    """
+    from nsys_ai.skills.registry import get_skill
+
+    skill = get_skill("root_cause_matcher")
+    rows = skill.execute(minimal_nsys_conn)
+    patterns = [r["pattern"] for r in rows]
+    assert "Synchronous Memset" in patterns
+
+
+def test_root_cause_all_patterns_execute(minimal_nsys_conn):
+    """Full scan should complete without crash and return valid findings."""
+    from nsys_ai.skills.registry import get_skill
+
+    skill = get_skill("root_cause_matcher")
+    rows = skill.execute(minimal_nsys_conn)
+    assert isinstance(rows, list)
+    assert len(rows) > 0
+    # Should have at least the 4 new anti-pattern findings
+    patterns = {r["pattern"] for r in rows}
+    assert "Excessive Synchronization" in patterns
+    assert "Synchronous Memcpy" in patterns
+    assert "Pageable Memory in Async Memcpy" in patterns
+    assert "Synchronous Memset" in patterns
+    # Format should also work
+    text = skill.format_rows(rows)
+    assert "Root Cause Pattern Analysis" in text
+    # Verify no [N] id prefix in formatted output
+    assert "[1]" not in text
+    assert "[3]" not in text
+

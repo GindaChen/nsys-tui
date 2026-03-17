@@ -47,6 +47,7 @@ def _resolve_activity_tables(conn: sqlite3.Connection) -> dict[str, str]:
     kernel_table = _find_by_prefix("CUPTI_ACTIVITY_KIND_KERNEL")
     runtime_table = _find_by_prefix("CUPTI_ACTIVITY_KIND_RUNTIME")
     memcpy_table = _find_by_prefix("CUPTI_ACTIVITY_KIND_MEMCPY")
+    memset_table = _find_by_prefix("CUPTI_ACTIVITY_KIND_MEMSET")
     if "NVTX_EVENTS" in tables:
         nvtx_table = "NVTX_EVENTS"
     else:
@@ -59,6 +60,8 @@ def _resolve_activity_tables(conn: sqlite3.Connection) -> dict[str, str]:
         resolved["runtime"] = runtime_table
     if memcpy_table:
         resolved["memcpy"] = memcpy_table
+    if memset_table:
+        resolved["memset"] = memset_table
     if nvtx_table:
         resolved["nvtx"] = nvtx_table
 
@@ -110,6 +113,18 @@ def ensure_indexes(conn: sqlite3.Connection) -> None:
         # Compound index for NVTX join queries (nvtx_layer_breakdown, nvtx_kernel_map)
         index_stmts.append(
             f"CREATE INDEX IF NOT EXISTS _nsysai_nvtx_range   ON {nvtx_table}(globalTid, start, [end])"
+        )
+
+    memcpy_table = tables.get("memcpy")
+    if memcpy_table:
+        index_stmts.append(
+            f"CREATE INDEX IF NOT EXISTS _nsysai_memcpy_corr ON {memcpy_table}(correlationId)"
+        )
+
+    memset_table = tables.get("memset")
+    if memset_table:
+        index_stmts.append(
+            f"CREATE INDEX IF NOT EXISTS _nsysai_memset_corr ON {memset_table}(correlationId)"
         )
 
     # Streamwise kernel index for window-function skills
@@ -244,6 +259,10 @@ class Skill:
         resolved.setdefault(
             "memcpy_table",
             tables.get("memcpy", "CUPTI_ACTIVITY_KIND_MEMCPY"),
+        )
+        resolved.setdefault(
+            "memset_table",
+            tables.get("memset", "CUPTI_ACTIVITY_KIND_MEMSET"),
         )
 
         # NVTX text resolution: handle both legacy (text column only)

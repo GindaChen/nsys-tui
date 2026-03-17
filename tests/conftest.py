@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS CUPTI_ACTIVITY_KIND_MEMCPY (
     globalPid       INTEGER DEFAULT 0,
     deviceId        INTEGER DEFAULT 0,
     streamId        INTEGER DEFAULT 0,
+    correlationId   INTEGER DEFAULT 0,
     copyKind        INTEGER DEFAULT 0,
     bytes           INTEGER DEFAULT 0,
     srcKind         INTEGER DEFAULT 0,
@@ -71,6 +72,7 @@ CREATE TABLE IF NOT EXISTS CUPTI_ACTIVITY_KIND_MEMSET (
     globalPid       INTEGER DEFAULT 0,
     deviceId        INTEGER DEFAULT 0,
     streamId        INTEGER DEFAULT 0,
+    correlationId   INTEGER DEFAULT 0,
     bytes           INTEGER DEFAULT 0,
     value           INTEGER DEFAULT 0,
     start           INTEGER NOT NULL,
@@ -97,7 +99,14 @@ CREATE TABLE IF NOT EXISTS NVTX_EVENTS (
 """
 
 _NSYS_SEED_SQL = """\
-INSERT INTO StringIds VALUES (1, 'kernel_A'), (2, 'kernel_B'), (10, 'nccl_AllReduce_kernel');
+INSERT INTO StringIds VALUES
+    (1, 'kernel_A'), (2, 'kernel_B'), (10, 'nccl_AllReduce_kernel'),
+    -- CUDA API names for anti-pattern detection tests
+    (20, 'cudaDeviceSynchronize'),
+    (21, 'cudaMemcpy'),
+    (22, 'cudaMemcpyAsync'),
+    (23, 'cudaMemset'),
+    (24, 'cudaLaunchKernel');
 
 INSERT INTO TARGET_INFO_GPU VALUES
     (0, 'NVIDIA Test GPU', '0000:00:00.0', 8589934592, 108, 'TestChip', 0);
@@ -111,9 +120,26 @@ INSERT INTO CUPTI_ACTIVITY_KIND_KERNEL VALUES
     (100, 0, 8, 10, 2500000, 3500000, 10, 10, 1, 1, 1, 512, 1, 1);
 
 INSERT INTO CUPTI_ACTIVITY_KIND_RUNTIME VALUES
-    (100, 1, 900000,  1000000, 0),
-    (100, 2, 2900000, 3000000, 0),
-    (100, 10, 2400000, 2500000, 0);
+    -- Kernel launches (existing)
+    (100, 1,   900000,  1000000, 24),   -- cudaLaunchKernel
+    (100, 2,  2900000,  3000000, 24),   -- cudaLaunchKernel
+    (100, 10, 2400000,  2500000, 24),   -- cudaLaunchKernel
+    -- Sync API calls (anti-pattern: Excessive Synchronization)
+    (100, 100, 5000000, 15000000, 20),  -- cudaDeviceSynchronize, 10ms
+    (100, 101, 16000000, 22000000, 20), -- cudaDeviceSynchronize, 6ms
+    -- Sync memcpy (anti-pattern: Synchronous Memcpy)
+    (100, 102, 23000000, 23500000, 21), -- cudaMemcpy (sync), 0.5ms
+    -- Sync memset (anti-pattern: Synchronous Memset)
+    (100, 103, 24000000, 24200000, 23); -- cudaMemset (sync), 0.2ms
+
+-- Sync memcpy correlated data (correlationId=102 matches cudaMemcpy runtime entry)
+-- srcKind=1 = Pageable memory (see CUPTI schema docs)
+INSERT INTO CUPTI_ACTIVITY_KIND_MEMCPY VALUES
+    (100, 0, 7, 102, 1, 1048576, 1, 2, 23100000, 23400000);
+
+-- Sync memset correlated data
+INSERT INTO CUPTI_ACTIVITY_KIND_MEMSET VALUES
+    (100, 0, 7, 103, 4096, 0, 24050000, 24150000);
 
 INSERT INTO NVTX_EVENTS (globalTid, start, end, text, eventType, rangeId) VALUES
     (100, 500000,  4500000, 'train_step', 59, 0),
