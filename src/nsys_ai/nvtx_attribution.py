@@ -21,7 +21,6 @@ import sqlite3
 import subprocess  # nosec B404 — list args, no shell
 from collections import defaultdict
 
-
 # ── Tier 1: nsys recipe ─────────────────────────────────────────────
 
 
