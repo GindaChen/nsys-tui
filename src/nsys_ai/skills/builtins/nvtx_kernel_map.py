@@ -32,19 +32,20 @@ SKILL = Skill(
     ),
     category="nvtx",
     sql="""\
-SELECT n.text AS nvtx_text,
+SELECT {nvtx_text_expr} AS nvtx_text,
        s.value AS kernel_name,
        ROUND(k.start / 1e6, 3) AS start_ms,
        ROUND(k.[end] / 1e6, 3) AS end_ms
-FROM NVTX_EVENTS n
-JOIN CUPTI_ACTIVITY_KIND_RUNTIME r
+FROM {nvtx_table} n
+JOIN {runtime_table} r
   ON n.eventType = 59
   AND n.globalTid = r.globalTid
   AND n.start <= r.start
   AND n.[end] >= r.[end]
-JOIN CUPTI_ACTIVITY_KIND_KERNEL k
+JOIN {kernel_table} k
   ON r.correlationId = k.correlationId
 JOIN StringIds s ON k.shortName = s.id
+{nvtx_text_join}
 WHERE 1=1 {trim_clause}
 ORDER BY k.start
 LIMIT {limit}""",

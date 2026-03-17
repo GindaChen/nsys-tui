@@ -91,12 +91,13 @@ CREATE TABLE IF NOT EXISTS NVTX_EVENTS (
     end             INTEGER DEFAULT -1,
     text            TEXT DEFAULT '',
     eventType       INTEGER DEFAULT 59,
-    rangeId         INTEGER DEFAULT 0
+    rangeId         INTEGER DEFAULT 0,
+    textId          INTEGER DEFAULT NULL
 );
 """
 
 _NSYS_SEED_SQL = """\
-INSERT INTO StringIds VALUES (1, 'kernel_A'), (2, 'kernel_B');
+INSERT INTO StringIds VALUES (1, 'kernel_A'), (2, 'kernel_B'), (10, 'nccl_AllReduce_kernel');
 
 INSERT INTO TARGET_INFO_GPU VALUES
     (0, 'NVIDIA Test GPU', '0000:00:00.0', 8589934592, 108, 'TestChip', 0);
@@ -106,13 +107,15 @@ INSERT INTO TARGET_INFO_CUDA_DEVICE VALUES
 
 INSERT INTO CUPTI_ACTIVITY_KIND_KERNEL VALUES
     (100, 0, 7, 1, 1000000, 2000000, 1, 1, 32, 1, 1, 256, 1, 1),
-    (100, 0, 7, 2, 3000000, 4000000, 2, 2, 16, 1, 1, 128, 1, 1);
+    (100, 0, 7, 2, 3000000, 4000000, 2, 2, 16, 1, 1, 128, 1, 1),
+    (100, 0, 8, 10, 2500000, 3500000, 10, 10, 1, 1, 1, 512, 1, 1);
 
 INSERT INTO CUPTI_ACTIVITY_KIND_RUNTIME VALUES
     (100, 1, 900000,  1000000, 0),
-    (100, 2, 2900000, 3000000, 0);
+    (100, 2, 2900000, 3000000, 0),
+    (100, 10, 2400000, 2500000, 0);
 
-INSERT INTO NVTX_EVENTS VALUES
+INSERT INTO NVTX_EVENTS (globalTid, start, end, text, eventType, rangeId) VALUES
     (100, 500000,  4500000, 'train_step', 59, 0),
     (100, 900000,  2100000, 'forward',    59, 1);
 """

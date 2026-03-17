@@ -50,6 +50,42 @@ def _parse_trim(args):
     return None
 
 
+def _coerce_param_value(raw_value, param_type):
+    """Coerce a raw string CLI parameter to the type expected by the skill.
+
+    Falls back to returning the raw string if no type information is
+    available.  Exits the process with an error message if coercion fails.
+    """
+    # If the skill did not declare a type, keep the raw string.
+    if param_type is None:
+        return raw_value
+
+    type_name = str(param_type).lower()
+
+    try:
+        if param_type is int or type_name in {"int", "integer"}:
+            return int(raw_value)
+        if param_type is float or type_name in {"float", "double"}:
+            return float(raw_value)
+        if param_type is bool or type_name in {"bool", "boolean"}:
+            val = raw_value.strip().lower()
+            if val in {"1", "true", "t", "yes", "y", "on"}:
+                return True
+            if val in {"0", "false", "f", "no", "n", "off"}:
+                return False
+            raise ValueError(f"cannot interpret '{raw_value}' as boolean")
+    except ValueError as exc:
+        print(
+            f"Error: cannot convert '{raw_value}' to {param_type}: {exc}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Default: treat as string.
+    return raw_value
+
+
+
 # ---------------------------------------------------------------------------
 # Help (moved from main_page; no curses)
 # ---------------------------------------------------------------------------
@@ -647,6 +683,56 @@ def _cmd_skill(args, _profile):
             trim_kwargs["trim_start_ns"] = int(trim[0] * 1e9)
             trim_kwargs["trim_end_ns"] = int(trim[1] * 1e9)
 
+        # Parse --param KEY=VALUE pairs into validated, typed kwargs
+        param_kwargs = {}
+
+        raw_params = getattr(args, "param", []) or []
+        skill_for_params = None
+        param_specs = None
+
+        if raw_params:
+            # Try to resolve the skill so we can validate and type-cast params.
+            try:
+                skill_for_params = get_skill(args.skill_name)
+            except Exception:
+                skill_for_params = None
+
+            if skill_for_params is not None and hasattr(skill_for_params, "params"):
+                param_specs = {
+                    p.name: p for p in skill_for_params.params
+                    if getattr(p, "name", None)
+                }
+            else:
+                param_specs = None
+
+        for pv in raw_params:
+            key, sep, val = pv.partition("=")
+            if not sep:
+                print(f"Error: --param must be KEY=VALUE, got: {pv}", file=sys.stderr)
+                sys.exit(1)
+
+            # If we have parameter metadata, validate the key and coerce the type.
+            if param_specs is not None:
+                if key not in param_specs:
+                    valid = ", ".join(sorted(param_specs.keys()))
+                    print(
+                        f"Error: unknown parameter '{key}' for skill "
+                        f"'{args.skill_name}'. "
+                        f"Valid parameters: {valid}",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+                spec = param_specs[key]
+                param_type = getattr(spec, "type", None)
+                val = _coerce_param_value(val, param_type)
+
+            param_kwargs[key] = val
+
+        # Merge trim-related kwargs with validated/typed skill params.
+        full_kwargs = {}
+        full_kwargs.update(trim_kwargs)
+        full_kwargs.update(param_kwargs)
+
         try:
             if fmt == "json":
                 skill = get_skill(args.skill_name)
@@ -661,10 +747,10 @@ def _cmd_skill(args, _profile):
                         )
                     )
                     sys.exit(1)
-                rows = skill.execute(conn, **trim_kwargs)
+                rows = skill.execute(conn, **full_kwargs)
                 print(_json.dumps(rows, indent=2))
             else:
-                print(_run_skill(args.skill_name, conn, **trim_kwargs))
+                print(_run_skill(args.skill_name, conn, **full_kwargs))
         finally:
             conn.close()
     elif args.skill_action == "add":
@@ -748,7 +834,11 @@ def _cmd_agent(args, _profile):
     from nsys_ai.agent.loop import Agent
 
     if args.agent_action == "analyze":
-        agent = Agent(args.profile)
+        trim_ns = None
+        trim = getattr(args, "trim", None)
+        if trim:
+            trim_ns = (int(trim[0] * 1e9), int(trim[1] * 1e9))
+        agent = Agent(args.profile, trim_ns=trim_ns)
         try:
             print(agent.analyze())
             # Optionally produce evidence findings JSON
@@ -1051,6 +1141,13 @@ def _register_legacy_commands(sub):
         help="Output format (default: text)",
     )
     sp_run.add_argument(
+        "--param", "-p",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Skill parameter, e.g. -p operation=full_model -p hidden_dim=2560",
+    )
+    sp_run.add_argument(
         "--trim",
         nargs=2,
         type=float,
@@ -1071,6 +1168,14 @@ def _register_legacy_commands(sub):
     agent_sub = p.add_subparsers(dest="agent_action")
     sp_analyze = agent_sub.add_parser("analyze", help="Full auto-analysis report")
     sp_analyze.add_argument("profile", help="Path to .sqlite file")
+    sp_analyze.add_argument(
+        "--trim",
+        nargs=2,
+        type=float,
+        metavar=("START_S", "END_S"),
+        default=None,
+        help="Time window in seconds (recommended for large profiles)",
+    )
     sp_analyze.add_argument(
         "--evidence", action="store_true", help="Also output evidence findings JSON"
     )

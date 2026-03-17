@@ -38,7 +38,7 @@ WITH ordered AS (
            s.value AS kernel_name,
            LAG(k.[end]) OVER (PARTITION BY k.streamId ORDER BY k.start) AS prev_end,
            LAG(s.value) OVER (PARTITION BY k.streamId ORDER BY k.start) AS prev_kernel
-    FROM CUPTI_ACTIVITY_KIND_KERNEL k
+    FROM {kernel_table} k
     JOIN StringIds s ON k.shortName = s.id
     WHERE 1=1 {trim_clause}
 )

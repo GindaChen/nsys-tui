@@ -46,6 +46,7 @@ def _resolve_activity_tables(conn: sqlite3.Connection) -> dict[str, str]:
 
     kernel_table = _find_by_prefix("CUPTI_ACTIVITY_KIND_KERNEL")
     runtime_table = _find_by_prefix("CUPTI_ACTIVITY_KIND_RUNTIME")
+    memcpy_table = _find_by_prefix("CUPTI_ACTIVITY_KIND_MEMCPY")
     if "NVTX_EVENTS" in tables:
         nvtx_table = "NVTX_EVENTS"
     else:
@@ -56,6 +57,8 @@ def _resolve_activity_tables(conn: sqlite3.Connection) -> dict[str, str]:
         resolved["kernel"] = kernel_table
     if runtime_table:
         resolved["runtime"] = runtime_table
+    if memcpy_table:
+        resolved["memcpy"] = memcpy_table
     if nvtx_table:
         resolved["nvtx"] = nvtx_table
 
@@ -104,6 +107,17 @@ def ensure_indexes(conn: sqlite3.Connection) -> None:
         index_stmts.append(
             f"CREATE INDEX IF NOT EXISTS _nsysai_nvtx_tid     ON {nvtx_table}(globalTid, start)"
         )
+        # Compound index for NVTX join queries (nvtx_layer_breakdown, nvtx_kernel_map)
+        index_stmts.append(
+            f"CREATE INDEX IF NOT EXISTS _nsysai_nvtx_range   ON {nvtx_table}(globalTid, start, [end])"
+        )
+
+    # Streamwise kernel index for window-function skills
+    # (gpu_idle_gaps, kernel_launch_pattern)
+    if kernel_table:
+        index_stmts.append(
+            f"CREATE INDEX IF NOT EXISTS _nsysai_kernel_stream ON {kernel_table}(streamId, start)"
+        )
 
     for stmt in index_stmts:
         try:
@@ -147,19 +161,25 @@ class Skill:
         params:      Accepted parameters
         format_fn:   Optional function(rows) → formatted string
         tags:        Search tags for skill discovery
+        execute_fn:  Optional Python callable(conn, **kwargs) → list[dict].
+                     When set, used instead of sql for execution.
     """
 
     name: str
     title: str
     description: str
     category: str
-    sql: str
+    sql: str = ""
     params: list[SkillParam] = field(default_factory=list)
     format_fn: Callable | None = None
     tags: list[str] = field(default_factory=list)
+    execute_fn: Callable | None = None
 
     def execute(self, conn: sqlite3.Connection, **kwargs) -> list[dict]:
-        """Run the skill's SQL against a connection.
+        """Run the skill against a connection.
+
+        If ``execute_fn`` is set, delegates to it.  Otherwise runs the
+        skill's SQL query against *conn*.
 
         Args:
             conn: SQLite connection to an Nsight profile database
@@ -174,19 +194,28 @@ class Skill:
         # Auto-create performance indexes (one-time per connection).
         ensure_indexes(conn)
 
-        # Apply defaults
-        resolved = {}
+        # Apply parameter defaults and required checks for all skill types.
+        # Start from the provided kwargs so we preserve any extra arguments.
+        resolved: dict[str, object] = dict(kwargs)
         for p in self.params:
-            if p.name in kwargs:
-                resolved[p.name] = kwargs[p.name]
-            elif p.default is not None:
+            if p.name in resolved:
+                # Caller-supplied value wins over default.
+                continue
+            if p.default is not None:
                 resolved[p.name] = p.default
             elif p.required:
-                raise ValueError(f"Skill '{self.name}' requires parameter '{p.name}'")
+                raise ValueError(
+                    f"Skill '{self.name}' requires parameter '{p.name}'"
+                )
 
+        # Python-level skill: delegate to execute_fn with resolved params.
+        if self.execute_fn is not None:
+            return self.execute_fn(conn, **resolved)
+
+        # SQL skill: further augment resolved params and run query
         # Handle {trim_clause} injection
-        trim_start = kwargs.get("trim_start_ns")
-        trim_end = kwargs.get("trim_end_ns")
+        trim_start = resolved.get("trim_start_ns")
+        trim_end = resolved.get("trim_end_ns")
         if trim_start is not None and trim_end is not None and "{trim_clause}" in self.sql:
             resolved["trim_clause"] = (
                 f"AND k.start >= {int(trim_start)} AND k.[end] <= {int(trim_end)}"
@@ -195,17 +224,59 @@ class Skill:
             # No trim requested — replace with empty string
             resolved["trim_clause"] = ""
 
+        # Inject resolved activity table names for versioned-table support.
+        # SQL templates use {kernel_table} etc. instead of hardcoding
+        # CUPTI_ACTIVITY_KIND_KERNEL which may be _KERNEL_V2/_V3 in
+        # newer Nsight Systems versions.
+        tables = _resolve_activity_tables(conn)
+        resolved.setdefault(
+            "kernel_table",
+            tables.get("kernel", "CUPTI_ACTIVITY_KIND_KERNEL"),
+        )
+        resolved.setdefault(
+            "runtime_table",
+            tables.get("runtime", "CUPTI_ACTIVITY_KIND_RUNTIME"),
+        )
+        resolved.setdefault(
+            "nvtx_table",
+            tables.get("nvtx", "NVTX_EVENTS"),
+        )
+        resolved.setdefault(
+            "memcpy_table",
+            tables.get("memcpy", "CUPTI_ACTIVITY_KIND_MEMCPY"),
+        )
+
+        # NVTX text resolution: handle both legacy (text column only)
+        # and modern schemas (textId → StringIds lookup).
+        nvtx_tbl = resolved.get("nvtx_table", "NVTX_EVENTS")
+        if "{nvtx_text_expr}" in self.sql or "{nvtx_text_join}" in self.sql:
+            try:
+                has_textid = conn.execute(
+                    f"SELECT COUNT(*) FROM pragma_table_info('{nvtx_tbl}') WHERE name='textId'"
+                ).fetchone()[0] > 0
+            except Exception:
+                has_textid = False
+            if has_textid:
+                resolved.setdefault("nvtx_text_expr", "COALESCE(n.text, s2.value)")
+                resolved.setdefault("nvtx_text_join", "LEFT JOIN StringIds s2 ON n.textId = s2.id")
+            else:
+                resolved.setdefault("nvtx_text_expr", "n.text")
+                resolved.setdefault("nvtx_text_join", "")
+
         sql = self.sql.format(**resolved) if resolved else self.sql
         cursor = conn.execute(sql)
         columns = [desc[0] for desc in cursor.description] if cursor.description else []
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
-    def run(self, conn: sqlite3.Connection, **kwargs) -> str:
-        """Execute and format results as text."""
-        rows = self.execute(conn, **kwargs)
+    def format_rows(self, rows: list[dict]) -> str:
+        """Format pre-computed rows as text (no re-execution)."""
         if self.format_fn:
             return self.format_fn(rows)
         return _default_format(self, rows)
+
+    def run(self, conn: sqlite3.Connection, **kwargs) -> str:
+        """Execute and format results as text."""
+        return self.format_rows(self.execute(conn, **kwargs))
 
     def to_tool_description(self) -> str:
         """Return a one-paragraph description suitable for an LLM tool catalog."""
