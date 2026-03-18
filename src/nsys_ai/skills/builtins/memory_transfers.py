@@ -76,7 +76,7 @@ SELECT
     CAST((k.start - b.min_start) / 1000000000.0 AS INT) AS second,
     COUNT(*) AS ops,
     SUM(k.bytes) / 1e6 AS total_mb,
-    (SUM(k.bytes) / NULLIF(SUM(k.[end] - k.start), 0)) * 1e9 / 1e9 AS avg_gbps
+    COALESCE(SUM(k.bytes) / NULLIF(SUM(k.[end] - k.start), 0), 0) * 1e9 / 1e9 AS avg_gbps
 FROM {memcpy_table} k CROSS JOIN baseline b
 WHERE k.copyKind = 1 {trim_clause}
 GROUP BY 1
@@ -107,9 +107,10 @@ def _execute_h2d_dist(conn, **kwargs):
     )
     try:
         return temp_skill.execute(conn, **kwargs)
-    except sqlite3.OperationalError:
-        # Missing memcpy table — treat as "no H2D transfers"
-        return []
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc).lower():
+            return []
+        raise
 
 H2D_DIST_SKILL.execute_fn = _execute_h2d_dist
 
