@@ -211,7 +211,7 @@ def detect_iterations(
 
     # --- Heuristic Fallback ---
     # If no NVTX markers match, fall back to detecting iterations by finding
-    # large gaps in kernel execution on the primary stream.
+    # large gaps in kernel execution on the primary CPU thread across all streams.
     if not iterations:
         with prof._lock:
             # Get all kernels on the primary thread
@@ -229,8 +229,13 @@ def detect_iterations(
             kernels_sorted = []
             for rt in rt_all:
                 k = kmap.get(rt["correlationId"])
-                if k:
-                    kernels_sorted.append(k)
+                if not k:
+                    continue
+                # Apply the same time window constraints as the NVTX path
+                if time_range is not None:
+                    if k["end"] < time_range[0] or k["start"] > time_range[1]:
+                        continue
+                kernels_sorted.append(k)
 
             kernels_sorted.sort(key=lambda x: x["start"])
 

@@ -186,6 +186,13 @@ class Agent:
         # Select Deep Dive Skills
         if has_llm:
             selected = self._try_llm_triage(question, evidence.get(triage_skill, []))
+            # Filter out triage skill and drop empty entries
+            selected = [s for s in selected if s and s != triage_skill]
+            # Fallback if LLM returned nothing usable
+            if not selected:
+                selected = self._select_skills(question)
+            if not selected:
+                selected = ["top_kernels", "gpu_idle_gaps"]
             sections.append(f"── Phase 2: AI Triage selected skills: {', '.join(selected)} ──\n")
         else:
             selected = self._select_skills(question)

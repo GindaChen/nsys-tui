@@ -87,11 +87,11 @@ ORDER BY 1""",
 
 # Replace the direct SQL with a safe execute_fn for the module
 def _execute_h2d_dist(conn, **kwargs):
-    """Execute the H2D distribution query, returning an empty result if the
-    underlying memcpy table does not exist.
+    """Execute the H2D distribution query safely.
 
-    This implementation avoids mutating the global H2D_DIST_SKILL instance and
-    instead uses a temporary Skill instance to force the SQL execution path.
+    This function is assigned as ``H2D_DIST_SKILL.execute_fn`` and wraps the
+    underlying SQL execution so that if the memcpy table does not exist, it
+    returns an empty result instead of propagating an sqlite3.OperationalError.
     """
     import sqlite3
 
