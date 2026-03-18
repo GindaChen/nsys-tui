@@ -72,7 +72,7 @@ H2D_DIST_SKILL = Skill(
 WITH baseline AS (
     SELECT MIN(start) AS min_start FROM {memcpy_table}
 )
-SELECT 
+SELECT
     CAST((k.start - b.min_start) / 1000000000.0 AS INT) AS second,
     COUNT(*) AS ops,
     SUM(k.bytes) / 1e6 AS total_mb,

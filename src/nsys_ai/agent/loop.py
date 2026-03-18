@@ -163,8 +163,8 @@ class Agent:
            executes them, and synthesizes a final response. If no LLM, falls back to keywords.
         """
         import os
-        has_llm = bool(os.environ.get("GEMINI_API_KEY") or 
-                       os.environ.get("OPENAI_API_KEY") or 
+        has_llm = bool(os.environ.get("GEMINI_API_KEY") or
+                       os.environ.get("OPENAI_API_KEY") or
                        os.environ.get("ANTHROPIC_API_KEY"))
 
         sections = [f"Question: {question}\n"]
@@ -225,11 +225,12 @@ class Agent:
         """Use LLM to select the next set of skills based on the triage findings."""
         import json
         import os
+
         from ..skills.registry import list_skills
 
         available_skills = list_skills()
         triage_json = json.dumps(triage_results, indent=2, default=str)
-        
+
         prompt = (
             f"You are a performance profiling expert. The user asked: '{question}'.\n"
             f"We ran a triage check (`root_cause_matcher`) and found these signals:\n"
@@ -268,7 +269,7 @@ class Agent:
                 return selected[:4]
         except Exception:
             pass
-        
+
         # Fallback to keywords if LLM fails
         return self._select_skills(question)
 

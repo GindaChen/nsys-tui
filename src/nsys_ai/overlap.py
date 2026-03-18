@@ -222,34 +222,34 @@ def detect_iterations(
                 """,
                 (primary_tid,),
             ).fetchall()
-            
+
             if not rt_all:
                 return []
-                
+
             kernels_sorted = []
             for rt in rt_all:
                 k = kmap.get(rt["correlationId"])
                 if k:
                     kernels_sorted.append(k)
-            
+
             kernels_sorted.sort(key=lambda x: x["start"])
-            
+
             if not kernels_sorted:
                 return []
-                
+
             # Find gaps > 2ms (2,000,000 ns) between kernels to denote step boundaries
             GAP_THRESHOLD_NS = 2_000_000
             boundaries = [kernels_sorted[0]["start"]]
-            
+
             last_k_end = kernels_sorted[0]["end"]
             for k in kernels_sorted[1:]:
                 if k["start"] - last_k_end > GAP_THRESHOLD_NS:
                     # Boundary detected
                     boundaries.append(k["start"])
                 last_k_end = max(last_k_end, k["end"])
-                
+
             boundaries.append(kernels_sorted[-1]["end"])
-            
+
             # Construct synthetic iterations from these boundaries
             for i in range(len(boundaries) - 1):
                 iterations.append({
@@ -257,7 +257,7 @@ def detect_iterations(
                     "end": boundaries[i+1],
                     "text": f"heuristic_step_{i}"
                 })
-                
+
     if not iterations:
         return []
 
