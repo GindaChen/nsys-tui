@@ -39,15 +39,7 @@ from .ai.backend.profile_db_tool import (
     open_profile_readonly,
     query_profile_db,
 )
-from .diff_tools import (
-    TOOLS_DIFF_OPENAI,
-    build_diff_system_prompt,
-    run_diff_tool,
-)
-from .hardware import get_peak_tflops
-from .mfu import compute_mfu_from_args
-from .profile import get_first_gpu_name
-from .region_mfu import compute_region_mfu_from_conn, compute_theoretical_flops
+from .diff_tools import TOOLS_DIFF_OPENAI, build_diff_system_prompt
 
 _log = logging.getLogger(__name__)
 _telemetry_log = logging.getLogger("nsys_ai.telemetry")
@@ -330,6 +322,59 @@ def run_agent_loop(
 # ---------------------------------------------------------------------------
 
 
+def _prepare_session(
+    profile_path: str | None,
+    messages: list,
+    ui_context: dict,
+    explicit_skills: list[str] | None = None,
+) -> tuple:
+    """Common setup: resolve profile → open readonly → schema → skill routing → system prompt.
+
+    Returns (conn, sqlite_path, system_prompt, query_runner).
+    Raises RuntimeError on profile path resolution errors.
+    """
+    from .profile import resolve_profile_path
+
+    conn = None
+    sqlite_path = None
+    schema_str = None
+    query_runner = None
+
+    if profile_path:
+        sqlite_path = resolve_profile_path(profile_path)
+        conn = open_profile_readonly(sqlite_path)
+        try:
+            schema_str = get_profile_schema_cached(conn, sqlite_path)
+        except Exception:
+            conn.close()
+            raise
+
+        def _runner(sql, c=conn):
+            return query_profile_db(c, sql)
+        query_runner = _runner
+
+    _effective_skills = explicit_skills
+    if not _effective_skills and messages:
+        try:
+            _effective_skills = _route_skill_names(messages)
+        except Exception:
+            pass
+
+    _skill_docs = None
+    if _effective_skills:
+        try:
+            from .prompt_loader import load_skill_context
+            _skill_docs = load_skill_context(_effective_skills) or None
+        except Exception:
+            pass
+
+    system_prompt = _build_system_prompt(
+        ui_context, profile_schema=schema_str, skill_docs=_skill_docs
+    )
+
+    return conn, sqlite_path, system_prompt, query_runner
+
+
 def chat_completion(body_bytes: bytes) -> dict | None:
     """Handle a POST ``/api/chat`` request body.
 
@@ -354,59 +399,33 @@ def chat_completion(body_bytes: bytes) -> dict | None:
     ui_context = payload.get("ui_context") or {}
     profile_path = payload.get("profile_path")
 
-    if profile_path:
-        try:
-            from .profile import resolve_profile_path
+    try:
+        conn, sqlite_path, system_prompt, query_runner = _prepare_session(
+            profile_path, messages, ui_context
+        )
+    except RuntimeError as e:
+        return {"content": f"Profile error: {e}", "actions": []}
 
-            sqlite_path = resolve_profile_path(profile_path)
-        except RuntimeError as e:
-            return {"content": f"Profile error: {e}", "actions": []}
-        conn = open_profile_readonly(sqlite_path)
-        try:
-            schema_str = get_profile_schema_cached(conn, sqlite_path)
-            _routed_skills = _route_skill_names(messages)
-            _routed_docs: str | None = None
-            if _routed_skills:
-                try:
-                    from .prompt_loader import load_skill_context
-                    _routed_docs = load_skill_context(_routed_skills) or None
-                except Exception:
-                    pass
-            system_prompt = _build_system_prompt(
-                ui_context, profile_schema=schema_str, skill_docs=_routed_docs
-            )
-            api_messages = [{"role": "system", "content": system_prompt}]
-            for m in messages:
-                if m.get("role") and m.get("content") is not None:
-                    api_messages.append({"role": m["role"], "content": m["content"]})
-            query_runner = lambda sql: query_profile_db(conn, sql)  # noqa: E731
-            try:
-                content, actions = run_agent_loop(
-                    model=model,
-                    api_messages=api_messages,
-                    tools=_tools_openai(),
-                    query_runner=query_runner,
-                    max_turns=5,
-                )
-                return {"content": content, "actions": actions}
-            except Exception as e:
-                return {"content": f"LLM error: {_friendly_error(model, e)}", "actions": []}
-        finally:
-            conn.close()
-
-    _routed_skills = _route_skill_names(messages)
-    _routed_docs2: str | None = None
-    if _routed_skills:
-        try:
-            from .prompt_loader import load_skill_context
-            _routed_docs2 = load_skill_context(_routed_skills) or None
-        except Exception:
-            pass
-    system_prompt = _build_system_prompt(ui_context, skill_docs=_routed_docs2)
     api_messages = [{"role": "system", "content": system_prompt}]
     for m in messages:
         if m.get("role") and m.get("content") is not None:
             api_messages.append({"role": m["role"], "content": m["content"]})
+
+    if profile_path and conn:
+        try:
+            content, actions = run_agent_loop(
+                model=model,
+                api_messages=api_messages,
+                tools=_tools_openai(),
+                query_runner=query_runner,
+                max_turns=5,
+            )
+            return {"content": content, "actions": actions}
+        except Exception as e:
+            return {"content": f"LLM error: {_friendly_error(model, e)}", "actions": []}
+        finally:
+            conn.close()
+
 
     try:
         response = litellm.completion(
@@ -537,34 +556,26 @@ def stream_agent_loop(
 
     use_diff = diff_context is not None and diff_paths is not None
     tools = tools if tools is not None else (TOOLS_DIFF_OPENAI if use_diff else _tools_openai())
-    conn = None
-    query_runner = None
-    sqlite_path: str | None = None
-
-    # Lazy import once per call (consolidates 4 previously-scattered imports)
-    from .profile import Profile, resolve_profile_path
-
     if use_diff:
         system_prompt = build_diff_system_prompt(
             diff_context, diff_paths[0], diff_paths[1], snapshot=None
         )
-    elif profile_path:
+        conn = None
+        sqlite_path = None
+        query_runner = None
+    else:
         try:
-            sqlite_path = resolve_profile_path(profile_path)
+            conn, sqlite_path, system_prompt, query_runner = _prepare_session(
+                profile_path, messages, ui_context, skill_names
+            )
         except RuntimeError as e:
             yield {"type": "text", "content": f"Profile error: {e}"}
             yield {"type": "done", "usage": {}}
             return
-        conn = open_profile_readonly(sqlite_path)
-        try:
-            schema_str = get_profile_schema_cached(conn, sqlite_path)
-            query_runner = lambda sql: query_profile_db(conn, sql)  # noqa: E731
-        except Exception:
-            if conn:
-                conn.close()
-            raise
-    else:
-        schema_str = None
+        except Exception as e:
+            yield {"type": "text", "content": f"Error loading profile data: {e}"}
+            yield {"type": "done", "usage": {}}
+            return
 
     # Fix 2: Filter out DB-dependent tools when no profile is connected.
     # This prevents LLM from calling tools that always fail, avoiding retry spirals.
@@ -573,35 +584,25 @@ def stream_agent_loop(
     if not use_diff and conn is None and tools:
         tools = [t for t in tools if t.get("function", {}).get("name") not in _DB_TOOLS]
 
-    # Resolve skill_docs from the skill_names list (best-effort; silent on missing)
-    # If no skill_names provided, auto-route from user messages for consistency
-    # with the non-streaming chat_completion path.
-    _skill_docs: str | None = None
-    _effective_skills = skill_names
-    if not _effective_skills and messages:
-        try:
-            _effective_skills = _route_skill_names(messages)
-        except Exception:
-            pass
-    if _effective_skills:
-        try:
-            from .prompt_loader import load_skill_context
-            _skill_docs = load_skill_context(_effective_skills) or None
-        except (ImportError, OSError):
-            pass
-
-    if not use_diff:
-        system_prompt = _build_system_prompt(
-            ui_context, profile_schema=schema_str, skill_docs=_skill_docs
-        )
     api_messages = [{"role": "system", "content": system_prompt}]
     for m in messages:
         if m.get("role") and m.get("content") is not None:
             api_messages.append({"role": m["role"], "content": m["content"]})
 
     usage: dict = {}
-    consecutive_db_errors = 0
     turn_count = 0
+
+    # Centralized tool dispatcher (replaces if/elif chain)
+    from .tool_dispatch import ToolDispatcher
+
+    dispatcher = ToolDispatcher(
+        conn=conn,
+        sqlite_path=sqlite_path,
+        query_runner=query_runner,
+        finding_counter=_next_finding_index,
+        mode="diff" if use_diff else "profile",
+        diff_context=diff_context,
+    )
 
     try:
         for _ in range(max_turns):
@@ -758,318 +759,37 @@ def stream_agent_loop(
             for tid, name, args_str in tc_list:
                 if not name or not tid:
                     continue
-                if use_diff:
-                    yield {"type": "system", "content": f"Running {name}..."}
-                    try:
-                        args = json.loads(args_str) if args_str.strip() else {}
-                    except json.JSONDecodeError:
-                        args = {}
-                    result = run_diff_tool(diff_context, name, args)
-                    api_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tid,
-                            "name": name,
-                            "content": json.dumps(result),
-                        }
-                    )
-                    continue
-                if name == "get_gpu_peak_tflops":
-                    yield {"type": "system", "content": "Getting GPU peak TFLOPS..."}
-                    if conn is not None:
-                        gpu_name = get_first_gpu_name(conn)
-                        result = get_peak_tflops(gpu_name)
-                    else:
-                        result = {"gpu_name": "", "error": "No profile loaded"}
-                    api_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tid,
-                            "name": name,
-                            "content": json.dumps(result),
-                        }
-                    )
-                    continue
-                if name == "compute_mfu":
-                    yield {"type": "system", "content": "Running compute_mfu..."}
-                    try:
-                        args = json.loads(args_str) if args_str.strip() else {}
-                    except json.JSONDecodeError:
-                        args = {}
-                    result = compute_mfu_from_args(args)
-                    api_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tid,
-                            "name": name,
-                            "content": json.dumps(result),
-                        }
-                    )
-                    continue
-                if name == "compute_theoretical_flops":
-                    yield {"type": "system", "content": "Computing theoretical FLOPs..."}
-                    try:
-                        args = json.loads(args_str) if args_str.strip() else {}
-                    except json.JSONDecodeError:
-                        args = {}
-                    op = str(args.get("operation") or "")
-                    if not op:
-                        result = {"error": {"code": "MISSING_PARAMETER", "message": "operation is required."}}
-                    else:
-                        result = compute_theoretical_flops(
-                            op,
-                            hidden_dim=int(args.get("hidden_dim") or 0),
-                            seq_len=int(args.get("seq_len") or 0),
-                            num_layers=int(args.get("num_layers") or 1),
-                            ffn_dim=int(args["ffn_dim"]) if args.get("ffn_dim") is not None else None,
-                            batch_size=int(args.get("batch_size") or 1),
-                            multiplier=int(args.get("multiplier") or 1),
-                            M=int(args.get("M") or 0),
-                            N=int(args.get("N") or 0),
-                            K=int(args.get("K") or 0),
-                        )
-                    api_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tid,
-                            "name": name,
-                            "content": json.dumps(result),
-                        }
-                    )
-                    continue
-                if name == "compute_region_mfu":
-                    yield {"type": "system", "content": "Running compute_region_mfu..."}
-                    if conn is None or sqlite_path is None:
-                        result = {
-                            "error": {
-                                "code": "PROFILE_NOT_LOADED",
-                                "message": "No profile loaded; cannot compute region MFU.",
-                            }
-                        }
-                    else:
-                        try:
-                            args = json.loads(args_str) if args_str.strip() else {}
-                        except json.JSONDecodeError:
-                            args = {}
-                        # Validate required params before calling
-                        region_name = args.get("name") or ""
-                        raw_flops = args.get("theoretical_flops")
-                        if not region_name:
-                            result = {
-                                "error": {
-                                    "code": "MISSING_PARAMETER",
-                                    "message": "name is required (NVTX range or kernel name).",
-                                }
-                            }
-                        elif raw_flops is None:
-                            result = {
-                                "error": {
-                                    "code": "MISSING_PARAMETER",
-                                    "message": "theoretical_flops is required and must be positive. "
-                                    "Compute it from model architecture using the MFU REFERENCE FORMULAS.",
-                                }
-                            }
-                        else:
-                            try:
-                                flops_val = float(raw_flops)
-                            except (ValueError, TypeError):
-                                flops_val = -1.0
-                            if flops_val <= 0:
-                                result = {
-                                    "error": {
-                                        "code": "INVALID_PARAMETER",
-                                        "message": f"theoretical_flops must be a positive number, got: {raw_flops!r}",
-                                    }
-                                }
-                            else:
-                                result = compute_region_mfu_from_conn(
-                                    conn,
-                                    sqlite_path,
-                                    region_name,
-                                    flops_val,
-                                    source=str(args.get("source") or "nvtx"),
-                                    peak_tflops=(
-                                        float(args["peak_tflops"])
-                                        if "peak_tflops" in args and args["peak_tflops"] is not None
-                                        else None
-                                    ),
-                                    num_gpus=int(args.get("num_gpus") or 1),
-                                    occurrence_index=int(args.get("occurrence_index") or 1),
-                                    device_id=(
-                                        int(args["device_id"])
-                                        if "device_id" in args and args["device_id"] is not None
-                                        else None
-                                    ),
-                                    match_mode=str(args.get("match_mode") or "contains"),
-                                )
-                    api_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tid,
-                            "name": name,
-                            "content": json.dumps(result),
-                        }
-                    )
-                    continue
-                if name == "submit_finding":
-                    try:
-                        finding_args = json.loads(args_str) if args_str.strip() else {}
-                    except json.JSONDecodeError:
-                        finding_args = {}
-                    # Allocate a concrete index for this finding so the
-                    # model can reference it as "[Finding N]".
-                    # If the caller (e.g., UI) provides an explicit index,
-                    # use that to stay in sync with the viewer's findings
-                    # list. Otherwise, if the caller told us how many
-                    # findings are already rendered (findings_count), use
-                    # that as a base offset so that our local counter does
-                    # not collide with or misalign existing cards.
-                    # As a final fallback, use just the module-level counter.
-                    explicit_index = finding_args.get("index")
-                    if isinstance(explicit_index, int):
-                        finding_index = explicit_index
-                    else:
-                        finding_index = _next_finding_index()
-                    finding_payload = dict(finding_args)
-                    finding_payload["index"] = finding_index
-                    yield {"type": "finding", "finding": finding_payload}
-                    api_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tid,
-                            "name": name,
-                            "content": json.dumps({
-                                "status": "submitted",
-                                "index": finding_index,
-                                "note": (
-                                    "Finding overlaid on timeline. "
-                                    f"Reference as [Finding {finding_index}] in your answer."
-                                ),
-                            }),
-                        }
-                    )
-                    continue
-                if name == "get_gpu_overlap_stats" and sqlite_path:
-                    yield {"type": "system", "content": "Computing GPU overlap stats..."}
-                    try:
-                        args = json.loads(args_str) if args_str.strip() else {}
-                    except json.JSONDecodeError:
-                        args = {}
-                    try:
-                        from .overlap import overlap_analysis as _overlap_fn
 
-                        _prof = None
-                        try:
-                            _prof = Profile(sqlite_path)
-                            _devices = _prof.meta.devices or [0]
-                            _start_s = args.get("start_s")
-                            _end_s = args.get("end_s")
-                            _trim = (
-                                (int(float(_start_s) * 1e9), int(float(_end_s) * 1e9))
-                                if _start_s is not None and _end_s is not None
-                                else None
-                            )
-                            _per_gpu = []
-                            for _dev in _devices:
-                                _oa = _overlap_fn(_prof, _dev, _trim)
-                                if isinstance(_oa, dict) and "error" not in _oa:
-                                    _oa["gpu_id"] = _dev
-                                    _gpu_info = _prof.meta.gpu_info.get(_dev)
-                                    if _gpu_info:
-                                        _oa["gpu_name"] = _gpu_info.name
-                                    _per_gpu.append(_oa)
-                            result = {
-                                "device_count": len(_devices),
-                                "per_gpu": _per_gpu,
-                            }
-                        finally:
-                            if _prof is not None:
-                                _prof.close()
-                    except Exception as _e:
-                        result = {"error": str(_e)}
-                    api_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tid,
-                        "name": name,
-                        "content": json.dumps(result),
-                    })
-                    continue
-                if name == "get_nccl_breakdown" and sqlite_path:
-                    yield {"type": "system", "content": "Analyzing NCCL collectives..."}
-                    try:
-                        args = json.loads(args_str) if args_str.strip() else {}
-                    except json.JSONDecodeError:
-                        args = {}
-                    try:
-                        from .overlap import nccl_breakdown as _nccl_fn
-
-                        _prof = None
-                        try:
-                            _prof = Profile(sqlite_path)
-                            _devices = _prof.meta.devices or [0]
-                            _dev = args.get("device_id", _devices[0])
-                            _start_s = args.get("start_s")
-                            _end_s = args.get("end_s")
-                            _trim = (
-                                (int(float(_start_s) * 1e9), int(float(_end_s) * 1e9))
-                                if _start_s is not None and _end_s is not None
-                                else None
-                            )
-                            _rows = _nccl_fn(_prof, int(_dev), _trim)
-                            result = {
-                                "device_id": _dev,
-                                "collectives": _rows,
-                            }
-                        finally:
-                            if _prof is not None:
-                                _prof.close()
-                    except Exception as _e:
-                        result = {"error": str(_e)}
-                    api_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tid,
-                        "name": name,
-                        "content": json.dumps(result),
-                    })
-                    continue
-                if name == "query_profile_db" and query_runner is not None:
-                    yield {"type": "system", "content": "Running DB query..."}
-                    try:
-                        sql = json.loads(args_str).get("sql_query", "")
-                        result = query_runner(sql)
-                    except Exception as e:
-                        result = f"Error: {e}"
-                    if result.startswith("Error:"):
-                        consecutive_db_errors += 1
-                        if consecutive_db_errors >= MAX_CONSECUTIVE_DB_ERRORS:
-                            result += (
-                                "\n[System: Repeated SQL errors. "
-                                "Please answer from available context without further queries.]"
-                            )
-                    else:
-                        consecutive_db_errors = 0
-                    api_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tid,
-                            "name": name,
-                            "content": result,
-                        }
-                    )
-                else:
-                    if name == "query_profile_db":
+                # 1) Profile and Diff tools — use the centralized dispatcher
+                if dispatcher.knows(name):
+                    tr = dispatcher.dispatch(name, args_str)
+                    yield from tr.events
+                    if not tr.skip_tool_message:
                         api_messages.append(
                             {
                                 "role": "tool",
                                 "tool_call_id": tid,
                                 "name": name,
-                                "content": "Not executed (no profile loaded).",
+                                "content": tr.content,
                             }
                         )
-                    action = _parse_tool_call(name, args_str)
-                    if action:
-                        has_external = True
-                        yield {"type": "action", "action": action}
+                    continue
+
+                # 3) Navigation / zoom / fit_nvtx — external actions
+                action = _parse_tool_call(name, args_str)
+                if action:
+                    has_external = True
+                    yield {"type": "action", "action": action}
+                else:
+                    # Unknown tool — send a stub response to avoid LLM confusion
+                    api_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tid,
+                            "name": name,
+                            "content": "Not executed.",
+                        }
+                    )
 
             if has_external:
                 yield {"type": "done", "usage": usage}

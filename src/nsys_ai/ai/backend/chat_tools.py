@@ -12,9 +12,14 @@ It does NOT make any LLM API calls (those live in chat.py).
 
 from __future__ import annotations
 
+import functools
 import json
+import logging
+from pathlib import Path
 
 from .profile_db_tool import TOOL_QUERY_PROFILE_DB
+
+logger = logging.getLogger(__name__)
 
 # Pure MFU tool: one step_time_s per call. Same tool in single-profile and diff; diff compares by calling twice.
 TOOL_COMPUTE_MFU = {
@@ -404,6 +409,36 @@ def _tools_openai() -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+@functools.lru_cache(maxsize=1)
+def _load_prompt_files() -> tuple[str | None, str | None]:
+    """Load chat_system and MFU reference prompt files once, with caching.
+
+    Returns:
+        A tuple ``(chat_system, mfu_ref)`` where each element may be ``None`` if
+        the corresponding file could not be read.
+    """
+    prompts_dir = Path(__file__).resolve().parent.parent.parent / "prompts"
+    chat_system: str | None = None
+    mfu_ref: str | None = None
+
+    # Load each file independently so a failure in one doesn't drop the other.
+    try:
+        chat_system = (prompts_dir / "chat_system.txt").read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        logger.warning("chat_system.txt not found in %s: %s", prompts_dir, exc)
+    except OSError as exc:
+        logger.error("Error reading chat_system.txt from %s: %s", prompts_dir, exc)
+
+    try:
+        mfu_ref = (prompts_dir / "mfu_reference.txt").read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        logger.warning("mfu_reference.txt not found in %s: %s", prompts_dir, exc)
+    except OSError as exc:
+        logger.error("Error reading mfu_reference.txt from %s: %s", prompts_dir, exc)
+
+    return (chat_system, mfu_ref)
+
+
 def _build_system_prompt(
     ui_context: dict,
     profile_schema: str | None = None,
@@ -431,120 +466,33 @@ def _build_system_prompt(
             "use || for concatenation not CONCAT()).\n"
             "=====================================================\n\n"
         )
-    return (
-        "You are an expert GPU performance analyst and UI navigator for an Nsight Systems viewer.\n"
-        "Your goal is to explain CUDA/GPU bottlenecks clearly and help users navigate the timeline.\n"
-        f"{schema_block}"
-        "=== CURRENT UI CONTEXT ===\n"
-        f"```json\n{ctx_json}\n```\n"
-        "==========================\n\n"
-        "INSTRUCTIONS:\n"
-        "1. When asked to explain a kernel or bottleneck, use the provided context. "
-        "Be concise, professional, and use Markdown for formatting.\n"
-        "2. If the user asks to go to, find, or locate a specific kernel or time range, "
-        "YOU MUST use the provided tools (`navigate_to_kernel`, `zoom_to_time_range`, "
-        "or `fit_nvtx_range`).\n"
-        "3. When a PROFILE DATABASE SCHEMA is provided above, you MUST use the "
-        "`query_profile_db` tool to answer whole-profile questions (e.g. first kernel, "
-        "slowest kernel, counts, total GPU time, total kernel count). Run a SELECT; "
-        "the backend returns the result and you answer from it. Never use `SELECT *`; "
-        "always select only the columns you need. For total GPU time use SUM(duration_ns)/1e6; "
-        "for kernel count use COUNT(*). Kernel names are stored as IDs referencing StringIds: "
-        "join with StringIds (e.g. k.shortName = StringIds.id) and use StringIds.value for "
-        "human-readable names. IMPORTANT: stats.total_gpu_ms, stats.total_kernel_count, and "
-        "global_top_kernels are intentionally OMITTED from ui_context when the DB agent is "
-        "enabled. You MUST use `query_profile_db` to answer any whole-profile questions - "
-        "do NOT guess or say the data is missing.\n"
-        "4. TOOL USE RULES:\n"
-        "   - Match kernel names exactly from `visible_kernels_summary` or `global_top_kernels`.\n"
-        "   - Do NOT explain what you are about to do before calling a tool. Just call the tool.\n"
-        "   - For `navigate_to_kernel`, `zoom_to_time_range`, and `fit_nvtx_range`: execution is immediate on the "
-        "client; you do not wait for a result. For `query_profile_db`: the backend runs the "
-        "query and returns rows; use them in your answer.\n"
-        "   - Do NOT output code blocks or JSON for navigation - use the actual tool call mechanism only.\n"
-        "5. NEVER REFUSE to calculate MFU when the user asks. Even if the result is approximate or the time "
-        "covers only a single kernel, compute it. Use compute_region_mfu with source='kernel' to get "
-        "kernel execution time directly. The user can judge whether the result is meaningful.\n"
-        "6. For whole-step MFU: (1) Call get_gpu_peak_tflops to get peak_tflops from the profile GPU. "
-        "   (2) Use query_profile_db to get step_time_s (e.g. (MAX([end])-MIN(start))/1e9). "
-        "   (3) Ask the user for model_flops_per_step (nsys does not store it). Do NOT call compute_mfu until the user "
-        "has provided it — after asking, end your response and wait for their reply; only then call compute_mfu with that value. "
-        "If get_gpu_peak_tflops returns an error, ask the user for peak_tflops as well.\n"
-        "7. For MFU of a specific NVTX region or kernel: use compute_region_mfu. "
-        "   - For NVTX ranges (e.g. 'Forward Pass'): set source='nvtx', name=<nvtx_text>. "
-        "   - For kernels (e.g. 'flash_fwd_kernel'): set source='kernel', name=<kernel_name>. "
-        "   The tool handles both modes. Provide theoretical_flops and optional peak_tflops / num_gpus.\n"
-        "   KERNEL NAME TIPS: The name parameter uses substring matching (LIKE '%%name%%').\n"
-        "   - Use SHORT technical names: 'flash' (not 'flash attention kernel'), 'gemm', 'nccl'.\n"
-        "   - If KERNEL_NOT_FOUND, retry with a shorter/broader keyword.\n"
-        "   - When unsure of exact name, use query_profile_db first to discover kernel names:\n"
-        "     SELECT DISTINCT s.value FROM StringIds s JOIN CUPTI_ACTIVITY_KIND_KERNEL k ON k.shortName=s.id WHERE s.value LIKE '%%flash%%'\n"
-        "   IMPORTANT: Use compute_theoretical_flops to compute FLOPs — do NOT compute manually.\n"
-        "   Workflow: (1) compute_theoretical_flops → get exact FLOPs, (2) compute_region_mfu with that value.\n"
-        "8. AUTONOMY: When a skill workflow is loaded at the end of this prompt, execute ALL steps in sequence "
-        "without pausing for user confirmation between steps. Only stop mid-workflow if: (a) a tool returns an "
-        "error that needs user action, (b) you need model architecture parameters the user hasn't provided, or "
-        "(c) the user explicitly asks you to pause. Do not ask 'shall I proceed?' — just proceed.\n"
-        "9. EFFICIENCY: You have a limited tool-call budget per question. Prefer fewer, broader SQL queries "
-        "over many narrow ones. When a workflow requires multiple queries (e.g. triage steps 2-4), batch them "
-        "into a single tool call round using parallel tool calls. Never run more than 3 separate "
-        "query_profile_db calls when you could combine them into one.\n"
-        "10. VISUAL EVIDENCE: When you identify a bottleneck, stall, idle gap, or anomaly, "
-        "call `submit_finding` to overlay it on the timeline. Get start_ns/end_ns from "
-        "query_profile_db (kernel start/[end] columns are in nanoseconds). After submitting, "
-        "reference it as [Finding N] (N = the returned index number) in your text so the user "
-        "can click it to zoom to the evidence.\n"
-        "11. MULTI-GPU ANALYSIS: When asked about GPU imbalance, NCCL overlap, or "
-        "communication overhead:\n"
-        "   - Call `get_gpu_overlap_stats` to get per-GPU compute/nccl/overlap/idle breakdown.\n"
-        "   - Call `get_nccl_breakdown` to identify collective types and infer parallelism strategy.\n"
-        "   - Compare compute_only_ms across GPUs to detect imbalance (max/min ratio > 1.2 = imbalanced).\n"
-        "   - overlap_pct > 60% = NCCL well-hidden; < 30% = serialized with compute.\n"
-        "   - After analysis, call `submit_finding` for any GPU with unusual overlap_pct or idle_ms.\n"
-        "\n"
-        "=== MFU REFERENCE (for choosing the right operation in compute_theoretical_flops) ===\n"
-        "The nsys profile does NOT store model FLOPs — you must calculate them from model architecture.\n"
-        "CRITICAL: theoretical_flops must match ONLY the computation the target kernel/region performs.\n\n"
-        "## 1. CORE PRINCIPLE — Match FLOPs to the Kernel\n"
-        "  If the user asks for the MFU of a SPECIFIC kernel, compute ONLY the FLOPs that kernel does.\n"
-        "  Do NOT use the full-model FLOPs for a single kernel's MFU.\n"
-        "  Example: flash_fwd_kernel only does attention matmuls (QK^T + softmax*V),\n"
-        "    so use 4*S*S*H per layer — NOT the full transformer layer FLOPs.\n\n"
-        "## 2. Common Kernel → FLOPs Mapping (per layer, forward only)\n"
-        "  Variables: H=hidden_dim, S=seq_len, L=num_layers, ffn=ffn_dim, head_dim=H/num_heads\n"
-        "  | Kernel type                     | What it computes        | FLOPs per layer         |\n"
-        "  |--------------------------------|-------------------------|-------------------------|\n"
-        "  | Attention matmul (flash_fwd)   | QK^T + softmax*V        | 4 * S * S * H           |\n"
-        "  | GEMM / linear projection       | Matrix multiply W*x     | 2 * M * N * K           |\n"
-        "  | QKV projection                 | Linear proj for Q,K,V   | 6 * S * H * H           |\n"
-        "  | Output projection              | Linear proj after attn  | 2 * S * H * H           |\n"
-        "  | MLP / FFN                      | Up + down projection    | 4 * S * H * ffn         |\n"
-        "  Total for all layers: multiply per-layer by L.\n"
-        "  For fwd+bwd: multiply by 3 (no checkpointing) or 4 (with checkpointing).\n\n"
-        "## 3. Full Model FLOPs (use for whole-step or NVTX-wrapped regions)\n"
-        "  Transformer per-layer FLOPs (forward, batch=1):\n"
-        "    flops_per_layer = 8*H*H*S + 4*H*ffn*S + 4*S*S*H  (self-attn + MLP)\n"
-        "  Full step:\n"
-        "    theoretical_flops = batch_size * flops_per_layer * L * multiplier * grad_accum\n"
-        "  Quick estimate: flops_per_step ≈ 6 * N_params * tokens_per_step (fwd+bwd)\n\n"
-        "## 4. Multi-GPU\n"
-        "  Pass num_gpus=world_size to compute_region_mfu. Peak is scaled automatically.\n\n"
-        "## 5. SANITY CHECK (MANDATORY)\n"
-        "  After computing MFU, check the result:\n"
-        "  - MFU > 100%  → theoretical_flops is TOO HIGH. You likely used full-model FLOPs\n"
-        "                   for a single kernel. Recalculate with only that kernel's FLOPs.\n"
-        "  - MFU < 0.1%  → theoretical_flops may be TOO LOW, or the kernel barely ran.\n"
-        "  - MFU 10-80%  → typical reasonable range for compute-bound kernels.\n"
-        "  If MFU > 100%, do NOT report it as-is. Recompute with correct FLOPs and explain.\n"
-        "=============================\n"
-        + (
-            "\n=== SESSION SKILL CONTEXT ===\n"
-            + skill_docs
-            + "\n=== END SESSION SKILL CONTEXT ===\n"
-            if skill_docs
-            else ""
+    chat_system, mfu_ref = _load_prompt_files()
+
+    if chat_system is not None:
+        # Use the template from the prompt file when available.
+        chat_system = chat_system.replace("{schema_block}", schema_block)
+        chat_system = chat_system.replace("{ctx_json}", ctx_json)
+        base_prompt = chat_system
+    else:
+        # Fallback minimal prompt if the prompt files could not be loaded.
+        logger.warning("Using fallback system prompt because prompt files could not be loaded.")
+        base_prompt = (
+            "You are an AI assistant helping users analyze performance profiles and MFU.\n"
+            "Respond with clear, concise, and technically accurate guidance.\n"
+            f"{schema_block}"
+            "=== UI CONTEXT (JSON) ===\n"
+            f"{ctx_json}\n"
+            "=====================================================\n"
         )
-    )
+
+    parts: list[str] = [base_prompt]
+    if mfu_ref:
+        parts.append(mfu_ref)
+
+    if skill_docs:
+        parts.append(f"\n=== SESSION SKILL CONTEXT ===\n{skill_docs}\n=== END SESSION SKILL CONTEXT ===\n")
+
+    return "\n".join(parts)
 
 
 
