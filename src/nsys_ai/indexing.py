@@ -137,19 +137,25 @@ def ensure_performance_indexes(conn: sqlite3.Connection) -> None:
             f"CREATE INDEX IF NOT EXISTS _nsysai_memset_corr ON {qt}(correlationId)"
         )
 
+    any_success = False
     for stmt in index_stmts:
         try:
             conn.execute(stmt)
-        except sqlite3.OperationalError:
-            # Table doesn't exist in this profile — skip silently.
-            pass
+            any_success = True
+        except sqlite3.OperationalError as exc:
+            # "no such table" is expected (profile may lack NVTX/NCCL data).
+            # Other OperationalError (locked, readonly) logged for diagnostics.
+            _log.debug("ensure_performance_indexes: %s — %s", stmt.split("ON")[0].strip(), exc)
         except Exception as exc:
-            # Read-only filesystem, locked DB, etc.
             _log.debug("ensure_performance_indexes: %s — %s", stmt.split("ON")[0].strip(), exc)
 
-    try:
-        conn.commit()
-    except Exception:
-        pass
+    if any_success:
+        try:
+            conn.commit()
+        except Exception:
+            pass
 
-    _indexed_connections.add(conn_id)
+    # Only mark as indexed if at least one index was created.
+    # This allows retry on readonly connections that are later reopened as writable.
+    if any_success:
+        _indexed_connections.add(conn_id)
