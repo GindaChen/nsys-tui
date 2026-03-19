@@ -1,0 +1,40 @@
+=== MFU REFERENCE (for choosing the right operation in compute_theoretical_flops) ===
+The nsys profile does NOT store model FLOPs — you must calculate them from model architecture.
+CRITICAL: theoretical_flops must match ONLY the computation the target kernel/region performs.
+
+## 1. CORE PRINCIPLE — Match FLOPs to the Kernel
+  If the user asks for the MFU of a SPECIFIC kernel, compute ONLY the FLOPs that kernel does.
+  Do NOT use the full-model FLOPs for a single kernel's MFU.
+  Example: flash_fwd_kernel only does attention matmuls (QK^T + softmax*V),
+    so use 4*S*S*H per layer — NOT the full transformer layer FLOPs.
+
+## 2. Common Kernel → FLOPs Mapping (per layer, forward only)
+  Variables: H=hidden_dim, S=seq_len, L=num_layers, ffn=ffn_dim, head_dim=H/num_heads
+  | Kernel type                     | What it computes        | FLOPs per layer         |
+  |--------------------------------|-------------------------|-------------------------|
+  | Attention matmul (flash_fwd)   | QK^T + softmax*V        | 4 * S * S * H           |
+  | GEMM / linear projection       | Matrix multiply W*x     | 2 * M * N * K           |
+  | QKV projection                 | Linear proj for Q,K,V   | 6 * S * H * H           |
+  | Output projection              | Linear proj after attn  | 2 * S * H * H           |
+  | MLP / FFN                      | Up + down projection    | 4 * S * H * ffn         |
+  Total for all layers: multiply per-layer by L.
+  For fwd+bwd: multiply by 3 (no checkpointing) or 4 (with checkpointing).
+
+## 3. Full Model FLOPs (use for whole-step or NVTX-wrapped regions)
+  Transformer per-layer FLOPs (forward, batch=1):
+    flops_per_layer = 8*H*H*S + 4*H*ffn*S + 4*S*S*H  (self-attn + MLP)
+  Full step:
+    theoretical_flops = batch_size * flops_per_layer * L * multiplier * grad_accum
+  Quick estimate: flops_per_step ≈ 6 * N_params * tokens_per_step (fwd+bwd)
+
+## 4. Multi-GPU
+  Pass num_gpus=world_size to compute_region_mfu. Peak is scaled automatically.
+
+## 5. SANITY CHECK (MANDATORY)
+  After computing MFU, check the result:
+  - MFU > 100%  → theoretical_flops is TOO HIGH. You likely used full-model FLOPs
+                   for a single kernel. Recalculate with only that kernel's FLOPs.
+  - MFU < 0.1%  → theoretical_flops may be TOO LOW, or the kernel barely ran.
+  - MFU 10-80%  → typical reasonable range for compute-bound kernels.
+  If MFU > 100%, do NOT report it as-is. Recompute with correct FLOPs and explain.
+=============================

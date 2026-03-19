@@ -21,11 +21,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .ai.backend.chat_tools import TOOL_COMPUTE_MFU, TOOL_GET_GPU_PEAK_TFLOPS
 from .diff import ProfileDiffSummary, diff_profiles
-from .hardware import get_peak_tflops
-from .mfu import compute_mfu_from_args
 from .nvtx_tree import build_nvtx_tree
 from .overlap import detect_iterations, overlap_analysis
 from .profile import Profile
@@ -797,22 +796,8 @@ def get_memory_profile_diff(
 
 # ── Phase C system prompt and tool metadata for agent integration ─────────────
 
-DIFF_SYSTEM_PROMPT = """
-You are a Senior MLSys Performance Engineer analyzing Nsight Systems (nsys) profile diffs.
-You have access to before/after SQLite profiles and MUST use the following tools in order.
-
-1. **Never guess names** — Call search_nvtx_regions or explore_nvtx_hierarchy to get exact NVTX/kernel strings before any diff call.
-2. **Wall-clock vs kernel sum** — If they diverge, conclude stream serialization or external sync, not kernel regression.
-3. **Explain "why"** — For regressed kernels, call get_launch_config_diff when available; if kernel sped up with no config change, check uses_tensor_core_likely.
-4. **Strict modality (nsys, not ncu)** — No cache hit rate, bandwidth, or bank-conflict claims; tell user to use Nsight Compute for those.
-5. **NCCL spike → imbalance first** — Not "network"; use get_gpu_imbalance_stats to prove; if within-node GPUs are balanced but NCCL still high, conclude cross-node delay.
-6. **Idle spike → CPU starvation** — If iteration slower but sum_of_kernels_ms unchanged and idle spiked, steer toward DataLoader / Python overhead.
-7. **Overlap caution** — If a kernel or region got faster but overlap_pct is high, warn that E2E speedup may be smaller or zero.
-8. **Hardware_Warning present** — Prefer thermal/power explanation before software regression.
-9. **Workload_Mismatch_Warning** — Do not draw a performance conclusion; tell user the input dimensions may differ.
-10. **Impact ratio** — Check pct_of_iteration_time and contribution_to_total_delta_pct; if regression is <1% of iteration time, classify as Negligible Variance.
-11. **MFU** — Only when the user explicitly asks for MFU, utilization, or efficiency metrics (do not proactively offer MFU when they only asked for regression causes or improvement ideas). Then: (1) Get step_time_s from get_iteration_diff (wall_clock_ms/1000) or get_global_diff. (2) Call get_gpu_peak_tflops; if it errors, ask the user for peak_tflops. (3) Ask the user for model_flops_per_step (nsys does not store it). **Do NOT call compute_mfu until the user has provided model_flops_per_step** — after asking, end your response and wait; only then call compute_mfu with the value they provided. (4) For before/after: call compute_mfu twice and synthesize (e.g. \"MFU before 35%, after 75%, +40%\").
-"""
+_PROMPTS_DIR = Path(__file__).parent / "prompts"
+DIFF_SYSTEM_PROMPT = (_PROMPTS_DIR / "diff_system.txt").read_text(encoding="utf-8")
 
 # Dynamic override: load skills/diff.md when available (falls back to hardcoded prompt).
 try:
@@ -1074,94 +1059,15 @@ TOOLS_DIFF_OPENAI = [
 
 def run_diff_tool(ctx: DiffContext, name: str, arguments: dict) -> dict:
     """Execute a Phase C tool by name with parsed arguments. Returns a JSON-serialisable dict."""
-    args = dict(arguments) if arguments else {}
+    args_str = json.dumps(arguments) if arguments else "{}"
+    from .tool_dispatch import ToolDispatcher
+    dispatcher = ToolDispatcher(mode="diff", diff_context=ctx)
+    res = dispatcher.dispatch(name, args_str)
     try:
-        if name == "search_nvtx_regions":
-            return search_nvtx_regions(
-                ctx, args.get("query", ""), args.get("limit", 50), args.get("use_glob", False)
-            )
-        if name == "get_iteration_boundaries":
-            return get_iteration_boundaries(ctx, args.get("marker"), args.get("target_gpu", 0))
-        if name == "explore_nvtx_hierarchy":
-            return explore_nvtx_hierarchy(
-                ctx,
-                args.get("parent_path", ""),
-                args.get("depth", 1),
-                args.get("target_gpu", 0),
-                args.get("profile_side", "after"),
-            )
-        if name == "get_top_nvtx_diffs":
-            return get_top_nvtx_diffs(ctx, args.get("limit", 20), args.get("target_gpu"))
-        if name == "get_iteration_diff":
-            return get_iteration_diff(
-                ctx,
-                int(args["iteration_index"]),
-                args.get("marker"),
-                args.get("target_gpu", 0),
-            )
-        if name == "get_region_diff":
-            nvtx = args.get("nvtx_exact_match")
-            if isinstance(nvtx, list):
-                pass
-            elif isinstance(nvtx, str):
-                nvtx = nvtx
-            else:
-                nvtx = ""
-            return get_region_diff(
-                ctx,
-                nvtx,
-                args.get("iteration_index"),
-                args.get("target_gpu", 0),
-            )
-        if name == "summarize_nvtx_subtree":
-            return summarize_nvtx_subtree(
-                ctx,
-                args.get("parent_path", ""),
-                args.get("iteration_index"),
-                args.get("target_gpu", 0),
-                args.get("top_n", 3),
-            )
-        if name == "get_launch_config_diff":
-            return get_launch_config_diff(
-                ctx,
-                args.get("kernel_name", ""),
-                args.get("iteration_index"),
-                args.get("target_gpu", 0),
-            )
-        if name == "get_source_code_context":
-            return get_source_code_context(ctx, args.get("nvtx_path", ""))
-        if name == "get_gpu_imbalance_stats":
-            return get_gpu_imbalance_stats(
-                ctx, int(args.get("iteration_index", 0)), args.get("marker")
-            )
-        if name == "get_global_diff":
-            return get_global_diff(
-                ctx,
-                args.get("skip_first_ms", 0),
-                args.get("duration_ms"),
-                args.get("target_gpu"),
-            )
-        if name == "get_memory_profile_diff":
-            return get_memory_profile_diff(
-                ctx,
-                args.get("iteration_index"),
-                args.get("target_gpu"),
-            )
-        if name == "get_gpu_peak_tflops":
-            devs = ctx.after.meta.devices or [0]
-            gpu_name = ""
-            if devs:
-                gi = ctx.after.meta.gpu_info.get(devs[0])
-                if gi:
-                    gpu_name = gi.name or ""
-            return get_peak_tflops(gpu_name)
-        if name == "compute_mfu":
-            return compute_mfu_from_args(args)
-    except (KeyError, TypeError, ValueError) as e:
-        return {"error": "invalid arguments", "detail": str(e)}
-    except Exception as e:
-        return {"error": str(e)}
-    return {"error": "unknown tool", "name": name}
+        j = json.loads(res.content)
+        return j if isinstance(j, dict) else {"result": j}
+    except json.JSONDecodeError:
+        return {"error": res.content}
 
 
 def build_diff_system_prompt(

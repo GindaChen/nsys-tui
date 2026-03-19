@@ -441,14 +441,14 @@ def test_trim_clause_no_placeholder():
 
 def test_skill_run_cli_trim_arg():
     """skill run parser should accept --trim argument."""
-    from nsys_ai.cli.app import _build_parser
+    from nsys_ai.cli.parsers import _build_parser
 
     _build_parser()  # verify no import/construction error
     # This replaces _register_legacy_commands; make sure we can parse
     # Build a minimal parse to verify --trim is accepted
     parsed = False
     try:
-        from nsys_ai.cli.app import _build_legacy_parser
+        from nsys_ai.cli.parsers import _build_legacy_parser
 
         lp = _build_legacy_parser()
         args = lp.parse_args(["skill", "run", "top_kernels", "test.sqlite", "--trim", "1.0", "3.0"])
