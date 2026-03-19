@@ -1,8 +1,8 @@
 """
 tool_dispatch.py — Centralized tool dispatch for the AI chat agent.
 
-Replaces the large if/elif chains in ``chat.py`` (``stream_agent_loop``
-and ``run_agent_loop``) with a registry-based dispatcher.
+Replaces the large if/elif chains in ``chat.py`` (in particular,
+``stream_agent_loop``) with a registry-based dispatcher.
 
 Usage::
 
@@ -46,13 +46,15 @@ class ToolResult:
 
 
 def _parse_json_args(args_str: str) -> dict:
-    """Parse JSON tool arguments, returning empty dict on failure."""
+    """Parse JSON tool arguments.
+
+    Returns an empty dict if the input is empty/whitespace. Otherwise,
+    returns the decoded JSON object, and propagates
+    ``json.JSONDecodeError`` if the input is not valid JSON.
+    """
     if not args_str or not args_str.strip():
         return {}
-    try:
-        return json.loads(args_str)
-    except json.JSONDecodeError:
-        return {}
+    return json.loads(args_str)
 
 
 class ToolDispatcher:
