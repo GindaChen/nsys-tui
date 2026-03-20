@@ -394,7 +394,7 @@ LIMIT ?"""
         sql = f"""\
 WITH baseline AS (
     SELECT MIN(start) AS min_start FROM {memcpy_table}
-    WHERE copyKind = 1 AND [end] >= ? AND start <= ?
+    WHERE copyKind = 1 AND deviceId = ? AND [end] >= ? AND start <= ?
 )
 SELECT
     CAST((m.start - b.min_start) / 1000000000.0 AS INT) AS second,
@@ -403,13 +403,17 @@ SELECT
     MIN(m.start) AS window_start,
     MAX(m.[end]) AS window_end
 FROM {memcpy_table} m CROSS JOIN baseline b
-WHERE m.copyKind = 1 AND m.[end] >= ? AND m.start <= ?
+WHERE m.copyKind = 1 AND m.deviceId = ? AND m.[end] >= ? AND m.start <= ?
 GROUP BY 1
 ORDER BY 1"""
         try:
             with self.prof._lock:
                 rows = self.prof.conn.execute(
-                    sql, (self.trim[0], self.trim[1], self.trim[0], self.trim[1])
+                    sql,
+                    (
+                        self.device, self.trim[0], self.trim[1],
+                        self.device, self.trim[0], self.trim[1],
+                    ),
                 ).fetchall()
         except Exception:
             return []

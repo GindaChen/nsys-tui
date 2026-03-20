@@ -363,40 +363,34 @@ def _diagnose_low_overlap(conn: sqlite3.Connection, **kwargs) -> dict:
             ).fetchall()
             if sync_names:
                 sync_id_list = [r[0] for r in sync_names]
-                placeholders = ",".join("?" for _ in sync_id_list)
+                sync_placeholders = ",".join("?" for _ in sync_id_list)
 
-                # Find NCCL kernel correlationIds
-                nccl_corrs = conn.execute(
+                # Single query: check if ANY sync call starts within 1ms
+                # after ANY NCCL kernel's end time (avoids N+1 loop).
+                found = conn.execute(
                     f"""
-                    SELECT k.correlationId, k.[end] AS kernel_end
-                    FROM {kernel_tbl} k
+                    SELECT 1 FROM {kernel_tbl} k
                     JOIN StringIds s ON k.shortName = s.id
                     WHERE (s.value LIKE '%nccl%' OR s.value LIKE '%NCCL%')
                       AND k.deviceId = ?
-                    ORDER BY k.start
+                      AND EXISTS (
+                          SELECT 1 FROM {runtime_tbl} r
+                          WHERE r.nameId IN ({sync_placeholders})
+                            AND r.start >= k.[end]
+                            AND r.start <= k.[end] + 1000000
+                      )
+                    LIMIT 1
                     """,
-                    (device,),
-                ).fetchall()
-
-                # Check if any sync call starts within 1ms after NCCL kernel ends
-                for nccl in nccl_corrs:
-                    nccl_end = nccl[1]
-                    sync_after = conn.execute(
-                        f"""
-                        SELECT COUNT(*) AS cnt FROM {runtime_tbl}
-                        WHERE nameId IN ({placeholders})
-                          AND start >= ? AND start <= ?
-                        """,
-                        sync_id_list + [nccl_end, nccl_end + 1_000_000],
-                    ).fetchone()
-                    if sync_after and sync_after[0] > 0:
-                        return {
-                            "cause": "sync_after_nccl",
-                            "detail": (
-                                "cudaStreamSynchronize/cudaDeviceSynchronize "
-                                "detected immediately after NCCL kernel completion"
-                            ),
-                        }
+                    [device] + sync_id_list,
+                ).fetchone()
+                if found:
+                    return {
+                        "cause": "sync_after_nccl",
+                        "detail": (
+                            "cudaStreamSynchronize/cudaDeviceSynchronize "
+                            "detected immediately after NCCL kernel completion"
+                        ),
+                    }
         except sqlite3.OperationalError as e:
             _log.debug("_diagnose_low_overlap (sync_after_nccl): %s", e)
 

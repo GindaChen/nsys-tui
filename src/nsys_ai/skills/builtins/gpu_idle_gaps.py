@@ -51,7 +51,6 @@ def _execute(conn: sqlite3.Connection, **kwargs):
 
 def _execute_inner(conn: sqlite3.Connection, **kwargs):
     """Inner implementation (row_factory managed by _execute)."""
-    ensure_indexes(conn)
 
     tables = _resolve_activity_tables(conn)
     kernel_tbl = tables.get("kernel")
@@ -61,15 +60,16 @@ def _execute_inner(conn: sqlite3.Connection, **kwargs):
 
     min_gap_ns = int(kwargs.get("min_gap_ns", 1_000_000))
     limit = int(kwargs.get("limit", 20))
+    device = int(kwargs.get("device", 0))
 
     # Build trim clause
     trim_start = kwargs.get("trim_start_ns")
     trim_end = kwargs.get("trim_end_ns")
     trim_clause = ""
-    trim_params: list = []
+    trim_params: list = [device]  # deviceId is always first param
     if trim_start is not None and trim_end is not None:
         trim_clause = "AND k.start >= ? AND k.[end] <= ?"
-        trim_params = [int(trim_start), int(trim_end)]
+        trim_params += [int(trim_start), int(trim_end)]
 
     # --- Phase 1: Find all gaps ---
     gap_sql = f"""\
@@ -77,11 +77,11 @@ WITH ordered AS (
     SELECT k.streamId,
            k.start, k.[end],
            s.value AS kernel_name,
-           LAG(k.[end]) OVER (PARTITION BY k.streamId ORDER BY k.start) AS prev_end,
-           LAG(s.value) OVER (PARTITION BY k.streamId ORDER BY k.start) AS prev_kernel
+           LAG(k.[end]) OVER (PARTITION BY k.deviceId, k.streamId ORDER BY k.start) AS prev_end,
+           LAG(s.value) OVER (PARTITION BY k.deviceId, k.streamId ORDER BY k.start) AS prev_kernel
     FROM {kernel_tbl} k
     JOIN StringIds s ON k.shortName = s.id
-    WHERE 1=1 {trim_clause}
+    WHERE k.deviceId = ? {trim_clause}
 )
 SELECT streamId,
        prev_end AS start_ns,
@@ -110,9 +110,9 @@ LIMIT ?"""
 WITH ordered AS (
     SELECT k.streamId,
            k.start, k.[end],
-           LAG(k.[end]) OVER (PARTITION BY k.streamId ORDER BY k.start) AS prev_end
+           LAG(k.[end]) OVER (PARTITION BY k.deviceId, k.streamId ORDER BY k.start) AS prev_end
     FROM {kernel_tbl} k
-    WHERE 1=1 {trim_clause}
+    WHERE k.deviceId = ? {trim_clause}
 )
 SELECT COUNT(*) AS gap_count,
        SUM(start - prev_end) AS total_gap_ns,
@@ -131,11 +131,13 @@ WHERE prev_end IS NOT NULL AND (start - prev_end) > ?"""
     # the number of active streams to avoid pct > 100%.
     try:
         time_range = conn.execute(
-            f"SELECT MIN(start), MAX([end]) FROM {kernel_tbl} WHERE 1=1 {trim_clause}", trim_params
+            f"SELECT MIN(start), MAX([end]) FROM {kernel_tbl} WHERE deviceId = ? {trim_clause}",
+            trim_params
         ).fetchone()
         profile_span_ns = (time_range[1] or 0) - (time_range[0] or 0)
         stream_count_row = conn.execute(
-            f"SELECT COUNT(DISTINCT streamId) AS n FROM {kernel_tbl} WHERE 1=1 {trim_clause}", trim_params
+            f"SELECT COUNT(DISTINCT streamId) AS n FROM {kernel_tbl} WHERE deviceId = ? {trim_clause}",
+            trim_params,
         ).fetchone()
         n_streams = stream_count_row["n"] if stream_count_row else 1
     except sqlite3.OperationalError:
@@ -267,6 +269,7 @@ SKILL = Skill(
     params=[
         SkillParam("min_gap_ns", "Minimum gap in nanoseconds to report", "int", False, 1000000),
         SkillParam("limit", "Max results", "int", False, 20),
+        SkillParam("device", "GPU device ID (default 0)", "int", False, 0),
     ],
     format_fn=_format,
     tags=["bubble", "idle", "gap", "pipeline", "stall", "utilization", "attribution"],
