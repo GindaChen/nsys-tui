@@ -1225,10 +1225,21 @@ function drawStreams(W, H) {
             const isSel = k === selectedKernel;
             const isNcclK = k.name.toLowerCase().includes('nccl');
 
-            // Per-kernel color from name hash (NCCL keeps special purple)
-            const kColor = isNcclK ? null : kernelColorFromName(k.name);
-            let fillColor = isNcclK ? '#d2a8ff' : kColor.color;
-            let kLightness = isNcclK ? 72 : kColor.lightness;  // #d2a8ff ≈ L72
+            // Per-kernel color from name hash (NCCL keeps special purple).
+            // Cache the resolved {color, lightness} on the kernel object so we
+            // don't recompute it on every redraw inside the hot render loop.
+            if (!k._nsysColor) {
+                if (isNcclK) {
+                    // #d2a8ff ≈ L72
+                    k._nsysColor = { color: '#d2a8ff', lightness: 72 };
+                } else {
+                    k._nsysColor = kernelColorFromName(k.name);
+                }
+            }
+
+            const kColor = k._nsysColor;
+            let fillColor = kColor.color;
+            let kLightness = kColor.lightness;
             let alpha = 0.78 + 0.22 * (k.heat || 0);
             // Apply dim overrides (search/NVTX) OR density reduction, not both
             if (searchQuery && !isMatch) {
