@@ -50,6 +50,7 @@ def _execute(conn, **kwargs):
             "max_ns": 0,
             "nvtx_depth": -1,
             "nvtx_path": "",
+            "nvtx_region": "",
         }
     )
     for r in rows:
@@ -58,8 +59,9 @@ def _execute(conn, **kwargs):
             continue
         dur_ns = r["k_dur_ns"]
         kernel_class = classify_kernel(r["kernel_name"])
+        path = r.get("nvtx_path", text)
 
-        stats = groups[text]
+        stats = groups[path]
         stats["total_ns"] += dur_ns
         stats["count"] += 1
         if dur_ns > stats["max_ns"]:
@@ -72,11 +74,12 @@ def _execute(conn, **kwargs):
         # Capture depth/path from first seen entry
         if stats["nvtx_depth"] < 0:
             stats["nvtx_depth"] = r.get("nvtx_depth", 0)
-            stats["nvtx_path"] = r.get("nvtx_path", text)
+            stats["nvtx_path"] = path
+            stats["nvtx_region"] = text
 
     # Build aggregated results
     results = []
-    for nvtx_text, stats in groups.items():
+    for path_key, stats in groups.items():
         total_ns = stats["total_ns"]
         count = stats["count"]
         max_ns = stats["max_ns"]
@@ -84,7 +87,7 @@ def _execute(conn, **kwargs):
         nccl_ns = stats["nccl_ns"]
         results.append(
             {
-                "nvtx_region": nvtx_text,
+                "nvtx_region": stats["nvtx_region"],
                 "nvtx_depth": stats["nvtx_depth"],
                 "nvtx_path": stats["nvtx_path"],
                 "kernel_count": count,
@@ -136,7 +139,7 @@ SKILL = Skill(
     params=[
         SkillParam("limit", "Max number of NVTX regions to return", "int", False, 20),
         SkillParam(
-            "depth", "Filter to specific NVTX nesting depth (0=top-level)", "int", False, None
+            "depth", "Filter to specific NVTX nesting depth (0=top-level). Only supported when using Tier 2 sqlite attribution.", "int", False, None
         ),
     ],
     format_fn=_format,

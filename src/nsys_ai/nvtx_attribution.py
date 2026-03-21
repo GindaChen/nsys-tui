@@ -251,12 +251,18 @@ def _sort_merge_attribute(
                     break
 
             if best_nvtx is not None:
-                # Build path from all enclosing NVTX up to and including the match
-                path_parts = [open_stack[j][2] for j in range(best_idx + 1)]
+                # Build path only from NVTX ranges that actually enclose [r_start, r_end]
+                enclosing_ranges = [
+                    entry for entry in open_stack[: best_idx + 1]
+                    if entry[0] <= r_start and entry[1] >= r_end
+                ]
+                # Derive depth from the number of enclosing ranges (0-based)
+                nvtx_depth = len(enclosing_ranges) - 1
+                path_parts = [entry[2] for entry in enclosing_ranges]
                 results.append(
                     {
                         "nvtx_text": best_nvtx,
-                        "nvtx_depth": best_idx,
+                        "nvtx_depth": nvtx_depth,
                         "nvtx_path": " > ".join(path_parts),
                         "kernel_name": sid_map.get(short_name, f"kernel_{short_name}"),
                         "k_start": k_start,

@@ -281,10 +281,20 @@ def _execute(conn: sqlite3.Connection, **kwargs):
                     )
 
     # --- Per-layer NVTX breakdown patterns ---
-    layer_data = _safe_execute("nvtx_layer_breakdown", conn, **kwargs)
+    # Use a high limit to avoid truncating layers and skewing percentages
+    layer_kwargs = {**kwargs, "limit": 1000}
+    layer_data = _safe_execute("nvtx_layer_breakdown", conn, **layer_kwargs)
     if layer_data and len(layer_data) >= 2:
-        nccl_hotspot_pct = float(kwargs.get("nccl_hotspot_pct", 40))
-        imbalance_ratio = float(kwargs.get("imbalance_ratio", 3.0))
+        try:
+            nccl_hotspot_pct = float(kwargs.get("nccl_hotspot_pct", 40.0))
+        except (ValueError, TypeError):
+            nccl_hotspot_pct = 40.0
+
+        try:
+            imbalance_ratio = float(kwargs.get("imbalance_ratio", 3.0))
+        except (ValueError, TypeError):
+            imbalance_ratio = 3.0
+
         findings += _check_layer_nccl_hotspot(layer_data, threshold_pct=nccl_hotspot_pct)
         findings += _check_pipeline_imbalance(layer_data, threshold_ratio=imbalance_ratio)
 
