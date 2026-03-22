@@ -784,12 +784,19 @@ def _safe_execute(skill_name, conn: sqlite3.Connection, **kwargs):
     """Execute a skill, returning [] on any error."""
     from ...skills.registry import get_skill
 
+    error_types = [sqlite3.Error]
+    try:
+        import duckdb
+        error_types.extend([duckdb.Error, duckdb.CatalogException])
+    except ImportError:
+        pass
+
     try:
         skill = get_skill(skill_name)
         if skill is None:
             return []
         return skill.execute(conn, **kwargs)
-    except (sqlite3.Error, duckdb.Error) as e:
+    except tuple(error_types) as e:
         _log.debug("root_cause_matcher (%s): %s", skill_name, e)
         return []
 

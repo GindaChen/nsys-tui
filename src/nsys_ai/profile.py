@@ -45,9 +45,13 @@ class NsightSchema:
 
     def __init__(self, conn: sqlite3.Connection):
         self._conn = conn
-        self.tables: list[str] = [
-            r[0] for r in self._conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        ]
+        import duckdb as _ddb
+        if isinstance(conn, _ddb.DuckDBPyConnection):
+            cur = self._conn.execute("SHOW TABLES")
+            self.tables: list[str] = [r[0] for r in cur.fetchall()]
+        else:
+            cur = self._conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            self.tables: list[str] = [r[0] for r in cur.fetchall()]
         self.version: str | None = self._detect_version()
         kt = self._detect_kernel_table()
         self.kernel_table: str | None = _validate_table_name(kt) if kt else None
@@ -62,8 +66,13 @@ class NsightSchema:
         if table not in self.tables:
             return {}
 
-        cur = self._conn.execute(f"PRAGMA table_info({table})")
-        cols = [row[1] for row in cur.fetchall()]  # 1 = name
+        import duckdb as _ddb
+        if isinstance(self._conn, _ddb.DuckDBPyConnection):
+            cur = self._conn.execute(f"DESCRIBE {table}")
+            cols = [row[0] for row in cur.fetchall()]  # 0 = column_name
+        else:
+            cur = self._conn.execute(f"PRAGMA table_info({table})")
+            cols = [row[1] for row in cur.fetchall()]  # 1 = name
         key_col = None
         val_col = None
 
@@ -189,15 +198,19 @@ class Profile:
         """Wrap an existing connection as a Profile without opening a new file.
 
         The connection is borrowed — ``close()`` will NOT close it.
-        DuckDB is not available in this mode (test/internal use).
+        Supports both SQLite and DuckDB connections.
         """
-        conn.row_factory = sqlite3.Row
+        import duckdb
+
+        is_duckdb = isinstance(conn, duckdb.DuckDBPyConnection)
+        if not is_duckdb:
+            conn.row_factory = sqlite3.Row
         obj = cls.__new__(cls)
         obj.conn = conn
         obj._lock = threading.Lock()
         obj._owns_conn = False
         obj.path = ""
-        obj.db = None  # type: ignore[assignment]
+        obj.db = conn if is_duckdb else None  # type: ignore[assignment]
         obj.schema = NsightSchema(conn)
         obj.meta = obj._discover()
         obj._nvtx_has_text_id = obj._detect_nvtx_text_id()
@@ -208,7 +221,11 @@ class Profile:
         if "NVTX_EVENTS" not in self.schema.tables:
             return False
         try:
-            cols = [r[1] for r in self.conn.execute("PRAGMA table_info(NVTX_EVENTS)").fetchall()]
+            import duckdb
+            if isinstance(self.conn, duckdb.DuckDBPyConnection):
+                cols = [r[0] for r in self.conn.execute("DESCRIBE NVTX_EVENTS").fetchall()]
+            else:
+                cols = [r[1] for r in self.conn.execute("PRAGMA table_info(NVTX_EVENTS)").fetchall()]
             return "textId" in cols
         except Exception:
             return False
@@ -228,20 +245,24 @@ class Profile:
 
         kernel_table = self.schema.kernel_table
 
+        import duckdb
+        is_duckdb = isinstance(self.conn, duckdb.DuckDBPyConnection)
+
         devices = [
             r[0]
             for r in self.conn.execute(
                 f"SELECT DISTINCT deviceId FROM {kernel_table} ORDER BY deviceId"
-            )
+            ).fetchall()
         ]
 
         streams: dict[int, list[int]] = {}
         for r in self.conn.execute(
             f"SELECT DISTINCT deviceId, streamId FROM {kernel_table} ORDER BY deviceId, streamId"
-        ):
+        ).fetchall():
             streams.setdefault(r[0], []).append(r[1])
 
-        tr = self.conn.execute(f"SELECT MIN(start), MAX([end]) FROM {kernel_table}").fetchone()
+        end_col = '"end"' if is_duckdb else '[end]'
+        tr = self.conn.execute(f"SELECT MIN(start), MAX({end_col}) FROM {kernel_table}").fetchone()
 
         kc = self.conn.execute(f"SELECT COUNT(*) FROM {kernel_table}").fetchone()[0]
         nc = (
@@ -268,7 +289,7 @@ class Profile:
         kcounts = {}
         for r in self.conn.execute(
             f"SELECT deviceId, COUNT(*) FROM {self.schema.kernel_table} GROUP BY deviceId"
-        ):
+        ).fetchall():
             kcounts[r[0]] = r[1]
 
         # Hardware info from TARGET_INFO_GPU + TARGET_INFO_CUDA_DEVICE
@@ -280,13 +301,13 @@ class Profile:
                        g.chipName, g.memoryBandwidth as bw
                 FROM TARGET_INFO_GPU g
                 JOIN TARGET_INFO_CUDA_DEVICE c ON g.id = c.gpuId
-                GROUP BY c.cudaId
-            """):
-                hw[r["dev"]] = dict(
-                    name=r["name"] or "",
-                    pci_bus=r["busLocation"] or "",
-                    sm_count=r["sms"] or 0,
-                    memory_bytes=r["mem"] or 0,
+                GROUP BY c.cudaId, g.name, g.busLocation, g.smCount, g.totalMemory, g.chipName, g.memoryBandwidth
+            """).fetchall():
+                hw[r[0]] = dict(
+                    name=r[1] or "",
+                    pci_bus=r[2] or "",
+                    sm_count=r[3] or 0,
+                    memory_bytes=r[4] or 0,
                 )
 
         for dev in devices:

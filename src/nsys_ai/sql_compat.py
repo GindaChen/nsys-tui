@@ -19,6 +19,14 @@ import re
 # collision with DuckDB array indexing (e.g. arr[0]) and numeric literals.
 _BRACKET_ID_RE = re.compile(r"\[([A-Za-z_]\w*)\]")
 
+# Matches hex integer literals like 0x1000000 which DuckDB doesn't support.
+_HEX_LITERAL_RE = re.compile(r"\b0x([0-9a-fA-F]+)\b")
+
+
+def _hex_to_decimal(match: re.Match) -> str:
+    """Convert a hex literal match to its decimal string equivalent."""
+    return str(int(match.group(1), 16))
+
 
 def sqlite_to_duckdb(sql: str) -> str:
     """Translate SQLite-specific SQL to DuckDB dialect.
@@ -27,5 +35,8 @@ def sqlite_to_duckdb(sql: str) -> str:
       ``[end]``  →  ``"end"``
       ``[start]`` → ``"start"``
       (any ``[identifier]`` → ``"identifier"``)
+      ``0x1000000`` → ``16777216`` (hex literals to decimal)
     """
-    return _BRACKET_ID_RE.sub(r'"\1"', sql)
+    sql = _BRACKET_ID_RE.sub(r'"\1"', sql)
+    sql = _HEX_LITERAL_RE.sub(_hex_to_decimal, sql)
+    return sql
