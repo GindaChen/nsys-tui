@@ -738,11 +738,11 @@ def compute_region_mfu(
     match_mode: str = "contains",
 ) -> RowDict | ErrorDict:
     """
-    Convenience wrapper that opens the profile and creates indexes if needed.
+    Convenience wrapper that opens the profile for MFU computation.
 
-    Opens in writable mode so ``_ensure_kernel_indexes`` can add indexes for
-    fast kernel lookups on large profiles.  The chat agent should prefer
-    :func:`compute_region_mfu_from_conn` to reuse its existing connection.
+    Uses ``open_profile_readonly`` to leverage the DuckDB Parquet cache when
+    available. The chat agent should prefer :func:`compute_region_mfu_from_conn`
+    to reuse its existing connection.
     """
     try:
         sqlite_path = resolve_profile_path(profile_path)
