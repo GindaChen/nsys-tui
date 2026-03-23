@@ -749,8 +749,8 @@ def compute_region_mfu(
     except RuntimeError as e:
         return _error("PROFILE_NOT_LOADED", f"Profile error: {e}")
 
-    conn = sqlite3.connect(sqlite_path)
-    conn.row_factory = sqlite3.Row
+    from nsys_ai.ai.backend.profile_db_tool import open_profile_readonly
+    conn = open_profile_readonly(sqlite_path)
     try:
         return compute_region_mfu_from_conn(
             conn,

@@ -30,7 +30,7 @@ import duckdb
 log = logging.getLogger(__name__)
 
 # Bump this when the cache schema changes (e.g., new columns, new tables).
-_CACHE_VERSION = 1
+_CACHE_VERSION = 2
 
 # Tables to export as-is from SQLite → Parquet.
 # (view_name, source_table_name)
@@ -38,6 +38,8 @@ _BASE_TABLES = [
     ("runtime", "CUPTI_ACTIVITY_KIND_RUNTIME"),
     ("memcpy", "CUPTI_ACTIVITY_KIND_MEMCPY"),
     ("memset", "CUPTI_ACTIVITY_KIND_MEMSET"),
+    ("overhead", "CUPTI_ACTIVITY_KIND_OVERHEAD"),
+    ("composite_events", "COMPOSITE_EVENTS"),
     ("string_ids", "StringIds"),
     ("gpu_info", "TARGET_INFO_GPU"),
     ("cuda_device", "TARGET_INFO_CUDA_DEVICE"),
@@ -312,6 +314,8 @@ def open_cached_db(sqlite_path: str) -> duckdb.DuckDBPyConnection:
         "gpu_info": ["TARGET_INFO_GPU"],
         "cuda_device": ["TARGET_INFO_CUDA_DEVICE"],
         "thread_names": ["ThreadNames"],
+        "overhead": ["CUPTI_ACTIVITY_KIND_OVERHEAD"],
+        "composite_events": ["COMPOSITE_EVENTS"],
     }
 
     existing_views = {r[0] for r in db.execute("SHOW TABLES").fetchall()}
