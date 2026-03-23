@@ -137,7 +137,6 @@ SELECT COUNT(*) AS gap_count,
 FROM ordered
 WHERE prev_end IS NOT NULL AND (start - prev_end) > ?"""
     try:
-        from ...sql_compat import sqlite_to_duckdb
         cur_agg = conn.execute(sqlite_to_duckdb(agg_sql), trim_params + [min_gap_ns])
         agg_row = cur_agg.fetchone()
         if agg_row is not None:
@@ -152,7 +151,6 @@ WHERE prev_end IS NOT NULL AND (start - prev_end) > ?"""
     # Gaps are summed across ALL streams, so we need to normalize by
     # the number of active streams to avoid pct > 100%.
     try:
-        from ...sql_compat import sqlite_to_duckdb
         time_range = conn.execute(
             sqlite_to_duckdb(f"SELECT MIN(k.start), MAX(k.[end]) FROM {kernel_tbl} AS k WHERE k.deviceId = ? {trim_clause}"),
             trim_params,
@@ -191,7 +189,6 @@ WHERE prev_end IS NOT NULL AND (start - prev_end) > ?"""
             gap_start = gap["start_ns"]
             gap_end = gap["end_ns"]
             try:
-                from ...sql_compat import sqlite_to_duckdb
                 cur_api = conn.execute(sqlite_to_duckdb(
                     f"""\
 SELECT s.value AS api_name, COUNT(*) AS call_count,

@@ -144,7 +144,6 @@ def query_profile_db(
 
         # Determine column names (works for both duckdb and sqlite)
         names = [d[0] for d in cur.description] if cur.description else []
-        import duckdb
 
         if getattr(conn, "row_factory", None) is sqlite3.Row and not isinstance(conn, duckdb.DuckDBPyConnection):
             out = [dict(r) for r in rows]
