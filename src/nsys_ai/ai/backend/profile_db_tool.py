@@ -133,7 +133,6 @@ def query_profile_db(
         from nsys_ai.sql_compat import sqlite_to_duckdb
         q = sqlite_to_duckdb(q)
 
-    import duckdb
     # Rewrite sqlite_master to SHOW TABLES (LLMs love sqlite_master)
     if "sqlite_master" in q.lower() and isinstance(conn, duckdb.DuckDBPyConnection):
         q = "SHOW TABLES"
@@ -273,9 +272,9 @@ def open_profile_readonly(path: str) -> "duckdb.DuckDBPyConnection | sqlite3.Con
     """Open a profile in read-only mode, using DuckDB Parquet cache if available.
 
     Note: If the Parquet cache is missing or stale, this function will build
-    a new `.nsys-cache` directory next to the profile before returning the
-    connection. While the query connection itself is read-only, the cache-
-    building process performs disk writes.
+    a ``<profile_basename>.nsys-cache`` directory next to the profile before
+    returning the connection.  While the query connection itself is read-only,
+    the cache-building process performs disk writes.
     """
     from nsys_ai import parquet_cache
 

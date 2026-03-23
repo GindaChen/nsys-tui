@@ -6,10 +6,13 @@ queries via DuckDB views over those Parquet files.
 
 Flow:
   1. First open: ``build_cache()`` attaches the SQLite DB via DuckDB,
-     exports tables to ``.nsys-cache/`` as Parquet, and runs the Tier 2
-     sort-merge to produce ``nvtx_kernel_map.parquet``.
+     exports tables into a sibling cache directory named
+     ``<profile_basename>.nsys-cache`` (e.g., ``profile.nsys-cache``) as
+     Parquet, and runs the Tier 2 sort-merge to produce
+     ``nvtx_kernel_map.parquet``.
   2. Subsequent opens: ``open_cached_db()`` creates a DuckDB connection
-     with views pointing at the cached Parquet files — sub-second startup.
+     with views pointing at the cached Parquet files in that
+     ``<profile_basename>.nsys-cache`` directory — sub-second startup.
 
 Cache invalidation uses mtime comparison + a version stamp file.
 """
