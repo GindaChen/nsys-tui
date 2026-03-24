@@ -140,7 +140,7 @@ def main():
         import json as _json
         import os
 
-        if os.environ.get("NSYS_AI_AGENT"):
+        if os.environ.get("NSYS_AI_AGENT") == "1":
             # Machine-readable output for external AI agents
             print(_json.dumps(e.to_dict()), file=sys.stderr)
         else:

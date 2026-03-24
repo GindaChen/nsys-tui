@@ -65,8 +65,12 @@ class _ThreadPoolMixIn(socketserver.ThreadingMixIn):
                     self.process_request_thread(request, client_address)
                 except Exception:
                     self.handle_error(request, client_address)
-            except (OSError, queue.Empty) as exc:
-                _log.debug("Pool worker error: %s", exc)
+            except queue.Empty:
+                continue
+            except OSError as exc:
+                _log.debug("Pool worker OS error: %s", exc)
+            except Exception:
+                _log.error("Unexpected pool worker error", exc_info=True)
 
 
 class _ThreadedHTTPServer(_ThreadPoolMixIn, socketserver.ThreadingMixIn, HTTPServer):

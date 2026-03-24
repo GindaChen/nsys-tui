@@ -411,11 +411,12 @@ def chat_completion(body_bytes: bytes) -> dict | None:
     ui_context = payload.get("ui_context") or {}
     profile_path = payload.get("profile_path")
 
+    from nsys_ai.exceptions import NsysAiError
     try:
         conn, sqlite_path, system_prompt, query_runner = _prepare_session(
             profile_path, messages, ui_context
         )
-    except RuntimeError as e:
+    except (RuntimeError, NsysAiError) as e:
         return {"content": f"Profile error: {e}", "actions": []}
 
     api_messages = [{"role": "system", "content": system_prompt}]
@@ -575,11 +576,12 @@ def stream_agent_loop(
         sqlite_path = None
         query_runner = None
     else:
+        from nsys_ai.exceptions import NsysAiError
         try:
             conn, sqlite_path, system_prompt, query_runner = _prepare_session(
                 profile_path, messages, ui_context, skill_names
             )
-        except RuntimeError as e:
+        except (RuntimeError, NsysAiError) as e:
             yield {"type": "text", "content": f"Profile error: {e}"}
             yield {"type": "done", "usage": {}}
             return

@@ -748,9 +748,10 @@ def compute_region_mfu(
     available. The chat agent should prefer :func:`compute_region_mfu_from_conn`
     to reuse its existing connection.
     """
+    from nsys_ai.exceptions import NsysAiError
     try:
         sqlite_path = resolve_profile_path(profile_path)
-    except RuntimeError as e:
+    except (RuntimeError, NsysAiError) as e:
         return _error("PROFILE_NOT_LOADED", f"Profile error: {e}")
 
     from nsys_ai.ai.backend.profile_db_tool import open_profile_readonly
