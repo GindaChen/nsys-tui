@@ -781,7 +781,7 @@ def _check_sync_memset(conn: sqlite3.Connection, **kwargs):
 
 
 def _safe_execute(skill_name, conn: sqlite3.Connection, **kwargs):
-    """Execute a skill, returning [] on any error."""
+    """Execute a skill, returning [] on DB or skill execution errors."""
     from ...exceptions import SkillExecutionError
     from ...skills.registry import get_skill
 

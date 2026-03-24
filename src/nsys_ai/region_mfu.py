@@ -756,7 +756,9 @@ def compute_region_mfu(
     from nsys_ai.exceptions import NsysAiError
     try:
         sqlite_path = resolve_profile_path(profile_path)
-    except (RuntimeError, NsysAiError) as e:
+    except NsysAiError as e:
+        return _error(e.error_code, f"Profile error: {e}")
+    except RuntimeError as e:
         return _error("PROFILE_NOT_LOADED", f"Profile error: {e}")
 
     from nsys_ai.ai.backend.profile_db_tool import open_profile_readonly
