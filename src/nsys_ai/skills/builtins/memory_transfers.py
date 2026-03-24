@@ -165,7 +165,7 @@ def _execute_h2d_dist(conn, **kwargs):
 
     This function is assigned as ``H2D_DIST_SKILL.execute_fn`` and wraps the
     underlying SQL execution so that if the memcpy table does not exist, it
-    returns an empty result instead of propagating an sqlite3.OperationalError.
+    returns an empty result instead of propagating a ``SkillExecutionError``.
 
     After executing the SQL, appends a pattern classification dict as the
     last element of the result list.

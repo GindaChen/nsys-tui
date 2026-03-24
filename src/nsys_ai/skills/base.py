@@ -44,6 +44,12 @@ def _resolve_activity_tables(conn: sqlite3.Connection) -> dict[str, str]:
     except (sqlite3.Error, ImportError) as exc:
         _log.debug("Failed to resolve activity tables: %s", exc, exc_info=True)
         return {}
+    except Exception as exc:
+        # Catch duckdb.Error without importing duckdb at module level
+        if type(exc).__module__.startswith("duckdb"):
+            _log.debug("Failed to resolve activity tables (duckdb): %s", exc, exc_info=True)
+            return {}
+        raise
 
     def _find_by_prefix(prefix: str) -> str | None:
         if prefix in tables:
@@ -215,6 +221,12 @@ class Skill:
             except (sqlite3.Error, ImportError) as exc:
                 _log.debug("NVTX textId detection failed: %s", exc, exc_info=True)
                 has_textid = False
+            except Exception as exc:
+                if type(exc).__module__.startswith("duckdb"):
+                    _log.debug("NVTX textId detection failed (duckdb): %s", exc, exc_info=True)
+                    has_textid = False
+                else:
+                    raise
             if has_textid:
                 resolved.setdefault("nvtx_text_expr", "COALESCE(n.text, s2.value)")
                 resolved.setdefault("nvtx_text_join", "LEFT JOIN StringIds s2 ON n.textId = s2.id")
