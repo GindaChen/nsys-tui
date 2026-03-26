@@ -41,4 +41,4 @@ echo "$GUIDE" | your_agent_framework --system-prompt -
 
 - **Handler**: `_cmd_agent_guide` in `src/nsys_ai/cli/handlers.py`
 - **Skill catalog**: Generated dynamically by `skill_catalog()` from `src/nsys_ai/skills/registry.py`
-- **No profile required**: This command has zero dependencies — no DuckDB, no SQLite, no cache
+- **No profile/database file required**: This command does not require an existing profile or database file, and it does not create any database connections or caches
