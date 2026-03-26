@@ -35,10 +35,10 @@ nsys-ai skill run top_kernels profile.sqlite --trim 1.5 3.0   # seconds
 - `--param KEY=VALUE` — pass a parameter (repeatable, shorthand: `-p`)
 - `--trim START_S END_S` — restrict analysis to time range (seconds, space-separated)
 
-### `nsys-ai skill add <path.md>`
+### `nsys-ai skill [--skills-dir <dir>] add <path.md>`
 
 Register a custom skill from a markdown file.
-Requires `--skills-dir <dir>` or the `NSYS_AI_CUSTOM_SKILLS_DIR` environment variable.
+Requires `--skills-dir <dir>` (before the subcommand) or the `NSYS_AI_CUSTOM_SKILLS_DIR` environment variable.
 The file must use heading-based format (not YAML frontmatter):
 - `# <name>` — top-level heading with the skill name
 - `## Description` — short summary
@@ -47,10 +47,10 @@ The file must use heading-based format (not YAML frontmatter):
 
 See `skills/SKILL_TEMPLATE.md` for a complete example.
 
-### `nsys-ai skill remove <name>`
+### `nsys-ai skill [--skills-dir <dir>] remove <name>`
 
 Unregister a previously added custom skill.
-Requires `--skills-dir <dir>` or the `NSYS_AI_CUSTOM_SKILLS_DIR` environment variable.
+Requires `--skills-dir <dir>` (before the subcommand) or the `NSYS_AI_CUSTOM_SKILLS_DIR` environment variable.
 
 ### `nsys-ai skill save`
 

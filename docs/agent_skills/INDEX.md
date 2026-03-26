@@ -78,7 +78,7 @@ nsys-ai report profile.sqlite --gpu 0 --trim 1.0 5.0 -o report.md
 > **Builtin Skills Catalog**: See [`commands/skill.md`](commands/skill.md) for the complete
 > list of 21 builtin skills with names, categories, descriptions, and parameters.
 >
-> *\* `skill add` and `skill remove` require `--skills-dir <dir>` or the `NSYS_AI_CUSTOM_SKILLS_DIR` environment variable.*
+> *\* `skill add` and `skill remove` require `--skills-dir <dir>` (before the subcommand, e.g. `nsys-ai skill --skills-dir <dir> add <path.md>`) or the `NSYS_AI_CUSTOM_SKILLS_DIR` environment variable.*
 
 ### Common agent workflows
 
