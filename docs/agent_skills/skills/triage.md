@@ -74,6 +74,9 @@ _How to detect parallelism_: Look at NCCL op types. Majority AllReduce → DP/FS
 
 ### Stage 6: Root Cause & Recommendations
 **Goal**: Synthesize findings into a causal chain to produce actionable recommendations.
+**Actions**:
+- **Source Code Correlation**: If you have access to the user's local source code alongside the profile, map your NVTX findings directly to the corresponding Python files. Inspect the exact code block (e.g., the dataloader setup, the explicit `torch.cuda.synchronize()` call) to verify the bottleneck and propose a direct code fix.
+
 **Common Root Cause Matrix**:
 
 | Root Cause | Evidence Pattern | Recommendation |

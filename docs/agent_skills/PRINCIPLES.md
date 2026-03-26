@@ -32,6 +32,7 @@ and diagnose performance issues without requiring a display or manual inspection
 - **Time is always in nanoseconds** in the profile database. Divide by 1e6 for ms, 1e9 for s.
 - **`theoretical_flops` is never in the profile.** It must be computed from model
   architecture parameters using `compute_theoretical_flops`.
+- **Correlate with Source Code** — If the user's local source code is available alongside the profile, always cross-reference NVTX regions and anomalous kernels with the actual Python files to propose highly specific, line-level code fixes.
 
 ---
 
@@ -129,6 +130,7 @@ After completing any analysis, verify:
 - [ ] Step time came from a single representative iteration (not full profile span)
 - [ ] Diff analysis skipped iteration 0
 - [ ] Any diff root cause statement includes: cause, evidence field+value, recommendation
+- [ ] Root cause recommendations include specific Python file names and target code blocks when local source code is accessible
 - [ ] No `SELECT *` was used
 - [ ] Time values were converted from ns (÷ 1e6 for ms, ÷ 1e9 for s)
 
