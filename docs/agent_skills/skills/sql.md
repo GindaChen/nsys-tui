@@ -40,7 +40,7 @@ Read this when you need to query the profile database, or for help with a specif
 | `NVTX_EVENTS` | `start`, `[end]`, `text` (or `textId`→StringIds), `globalTid` | Use COALESCE when textId present |
 | `StringIds` | `id`(int), `value`(string) | Maps integer IDs to human-readable names |
 | `CUPTI_ACTIVITY_KIND_RUNTIME` | `correlationId`, `start`, `[end]`, `globalTid` | CPU-side CUDA API; links to kernel via correlationId |
-| `TARGET_INFO_GPU` | GPU hardware info | Source for `get_gpu_peak_tflops()` |
+| `TARGET_INFO_GPU` | GPU hardware info | GPU name, compute capability, etc. |
 | `CUDA_GPU_MEMORY_USAGE_EVENTS` | Memory alloc/free | Only if `--cuda-memory-usage=true` was used |
 | `CUPTI_ACTIVITY_KIND_SOURCE_LOCATOR` | Source file + line | Only if source profiling enabled |
 
@@ -126,7 +126,7 @@ GROUP BY k.shortName ORDER BY ms DESC LIMIT 20
 
 ```sql
 -- All tables in this profile
-SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name
+SHOW TABLES
 
 -- Columns in a table (use DESCRIBE, not PRAGMA)
 DESCRIBE CUPTI_ACTIVITY_KIND_KERNEL
@@ -137,6 +137,5 @@ DESCRIBE NVTX_EVENTS
 ```
 
 > **Note**: DuckDB profiles use `SHOW TABLES` and `DESCRIBE` natively.
-> The `schema_inspect` skill handles both backends automatically.
-> Internal agents should call the `schema_inspect` skill directly.
-> External agents (CLI) can run: `nsys-ai skill run schema_inspect profile.sqlite` for discovery.
+> The `schema_inspect` skill handles both SQLite and DuckDB backends automatically.
+> Example usage: `nsys-ai skill run schema_inspect profile.sqlite` for discovery.

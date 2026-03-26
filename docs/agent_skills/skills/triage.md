@@ -6,71 +6,86 @@ or asks "what's the bottleneck?" / "why is it slow?".
 
 ---
 
-## Workflow 0: Triage
+This is a **top-down, elimination-based** pipeline. From the macro-level to the micro-level, utilize these 6 stages to systematically eliminate bottlenecks and pinpoint root causes. 
 
-```
-Step 1  get_gpu_peak_tflops()
-        → Record gpu_name and peak_tflops. Note error if GPU unknown.
+You must intelligently combine these stages via the explicitly listed `nsys-ai` CLI tools.
 
-Step 2  Basic profile facts:
-        SELECT (MAX([end]) - MIN(start)) / 1e9 AS span_s, COUNT(*) AS n_kernels
-        FROM CUPTI_ACTIVITY_KIND_KERNEL
+### Stage 1: Orient — Establish the Workload Context
+**Goal**: Determine the basic context to avoid blindly guessing.
+**Actions**:
+- What is the profile duration? How many GPUs?
+- What is the workload (training, inference, fine-tuning)?
+- What parallelism strategy is used (TP, PP, DP, FSDP, Single GPU)?
+- Are NVTX annotations present? (Determines granularity of downstream analysis).
+_How to detect parallelism_: Look at NCCL op types. Majority AllReduce → DP/FSDP. AllGather + ReduceScatter → FSDP/TP. Send/Recv → PP. Mixed → Hybrid.
+**Suggested Approach**: Use `nsys-ai info <profile>` to get basic hardware facts. For advanced schema or parallelism detection, explore the [commands/skill.md](../commands/skill.md) catalog for relevant skills (e.g., `schema_inspect`, `nccl_anomaly`).
 
-Step 3  Top kernels by GPU time:
-        SELECT s.value AS name, COUNT(*) AS cnt,
-               SUM(k.[end]-k.start)/1e6 AS total_ms,
-               ROUND(100.0*SUM(k.[end]-k.start) /
-                 (SELECT MAX([end])-MIN(start) FROM CUPTI_ACTIVITY_KIND_KERNEL), 1) AS pct_of_span
-        FROM CUPTI_ACTIVITY_KIND_KERNEL k JOIN StringIds s ON k.shortName=s.id
-        GROUP BY k.shortName ORDER BY total_ms DESC LIMIT 15
+---
 
-Step 4  Check NVTX and NCCL presence (two separate queries):
-        SELECT COUNT(*) AS nvtx_count FROM NVTX_EVENTS
-        SELECT COUNT(*) AS nccl_count,
-               SUM(k.[end]-k.start)/1e6 AS nccl_ms
-        FROM CUPTI_ACTIVITY_KIND_KERNEL k JOIN StringIds s ON k.shortName=s.id
-        WHERE LOWER(s.value) LIKE '%nccl%'
+### Stage 2: Temporal Breakdown — The Time Budget
+**Goal**: Establish a "time budget" to determine where GPU time is spent (compute, communication, memory, idle).
+**Actions**:
+- Calculate GPU time breakdown: Compute %, NCCL %, Memcpy %, Idle %.
+- Identify the **primary bottleneck class**:
+  - *Compute-bound*: Idle < 10%, NCCL < 20%
+  - *Communication-bound*: NCCL > 30%, compute/NCCL ratio < 1
+  - *Sync/idle-bound*: Idle > 30%
+  - *Memory-bound*: H2D/D2H > 15%, or massive memcpy interleaved with compute
+  - *Pipeline-bubble-bound* (PP only): Regular, long idle gaps near step boundaries
+**Suggested Approach**: Query the aggregate compute/NCCL breakdown (e.g., via the `overlap_breakdown` skill). Refer to [commands/skill.md](../commands/skill.md) to discover other skills tailored for checking idle gaps or memory bandwidth.
 
-Step 5  Classify the bottleneck from top kernel names:
-        ┌────────────────────────────┬──────────────────────────────────────────────┐
-        │ Top kernel pattern         │ Diagnosis                                    │
-        ├────────────────────────────┼──────────────────────────────────────────────┤
-        │ flash_fwd / flash_bwd      │ Attention-bound (normal for seq_len > 4096)  │
-        │ sm80_xmma / ampere_sgemm   │ GEMM-bound (projection layers dominate)      │
-        │ nccl* > 20% of span        │ Communication-bound → read skills/distributed│
-        │ elementwise* / layer_norm  │ Memory bandwidth-bound (small batch/model)   │
-        │ All kernels tiny, many gaps│ CPU-bound / launch overhead (not GPU-bound)  │
-        └────────────────────────────┴──────────────────────────────────────────────┘
+---
 
-Step 6  [Exploration extension] Check iteration regularity if NVTX present:
-        SELECT MIN(n.[end]-n.start)/1e6 AS min_ms,
-               MAX(n.[end]-n.start)/1e6 AS max_ms,
-               AVG(n.[end]-n.start)/1e6 AS avg_ms,
-               COUNT(*) AS n_iters
-        FROM NVTX_EVENTS n LEFT JOIN StringIds s ON n.textId=s.id
-        WHERE COALESCE(n.text, s.value) LIKE '%sample%'
-           OR COALESCE(n.text, s.value) LIKE '%step%'
-        [If max_ms > 2 × avg_ms] → read skills/variance.md
+### Stage 3: Kernel Deep-Dive — The Heaviest Kernels
+**Goal**: Identify the top-N heaviest kernels and determine if their duration is justified.
+**Actions**:
+- Find the top 10 kernels by total duration.
+- Classify and evaluate each top kernel:
+  - Compute (GEMM, FlashAttention, Conv) → Normal, actual work being done.
+  - NCCL (AllReduce, AllGather) → Check if the proportion is reasonable.
+  - Memcpy → Abnormal. Investigate why data is moving.
+  - Sync/Wait → Abnormal. Points to synchronization/idle issues.
+- Analyze **launch patterns**: Are they executed in bursts or evenly spaced? Is there serialization (kernels executing sequentially on the same stream without concurrency)?
+**Suggested Approach**: Identify the top consumers first (e.g., via the `top_kernels` skill). See [commands/skill.md](../commands/skill.md) for deeper analysis tools to investigate launch patterns or stream concurrency.
 
-Step 7  Give the user a concise summary, then ask what to investigate:
-        "GPU: <name>, peak <X> TFLOPS BF16
-         Profile span: <X>s, <N> kernels
-         Primary bottleneck: <kernel/pattern> = <X>% of GPU time
-         NVTX: <present/absent>  |  NCCL: <present: X% / absent>
+---
 
-         What would you like to investigate?
-         (a) GPU efficiency / MFU  (b) Specific regression vs another run
-         (c) NCCL / distributed    (d) Iteration variance"
-```
+### Stage 4: NVTX → Code Mapping — Who is Calling What?
+**Goal**: Attribute GPU kernels back to the Python source code level operations.
+**Actions** (Requires NVTX annotations):
+- Inspect NVTX hierarchy: Usually Step > Forward/Backward/Optimizer > Layer > Op.
+- Perform Top Kernel NVTX attribution: Which NVTX range is calling `flash_bwd_kernel`?
+- Identify **which layer or operation** consumes the most GPU time.
+- If NVTX is absent: Perform heuristic kernel-to-PyTorch mapping (e.g., `ampere_sgemm` → linear layer, `flash_fwd` → attention).
+**Suggested Approach**: View the full NVTX tree (e.g., using `nsys-ai tree <profile> --depth 3`). For specific kernel mapping, consult the [commands/skill.md](../commands/skill.md) catalog for NVTX-related skills like `nvtx_layer_breakdown`.
 
-## Routing Table
+---
 
-After triage, route to:
+### Stage 5: Cross-GPU Analysis — Multi-GPU Bottlenecks
+**Goal**: Identify inter-GPU dependencies and imbalances.
+**Actions**:
+- **Compute/NCCL overlap**: Are NCCL and compute overlapping? Low overlap (<30%) means GPUs are idle during NCCL (no computation hiding).
+- **NCCL Anomaly Detection**: Do specific NCCL op durations exceed the median significantly? (Suggests a specific rank dragging down collective comms).
+- **Per-GPU idle variance**: Is idle % consistent across all GPUs? E.g., if GPU 0 idles at 5% but GPU 3 idles at 30%, suspect load imbalance or PP bubbles.
+- **Pipeline bubbles** (PP only): Look for fixed-pattern long idle gaps near training step boundaries (Send/Recv waits between micro-batches).
+**Suggested Approach**: Analyze cross-GPU overlaps (e.g., via the `overlap_breakdown` skill). Check [commands/skill.md](../commands/skill.md) for multi-GPU anomaly detectors like `nccl_anomaly` or per-GPU idle variance checkers.
 
-| Finding | Next step |
-|---------|-----------|
-| User wants MFU number | `skills/mfu.md` |
-| Before + after profiles loaded | `skills/diff.md` |
-| nccl_count > 0 and user concerned | `skills/distributed.md` |
-| max_iter_ms > 2 × avg | `skills/variance.md` |
-| Need to query DB further | `skills/sql.md` |
+---
+
+### Stage 6: Root Cause & Recommendations
+**Goal**: Synthesize findings into a causal chain to produce actionable recommendations.
+**Common Root Cause Matrix**:
+
+| Root Cause | Evidence Pattern | Recommendation |
+|-----------|-----------------|----------------|
+| Explicit sync stalls | `gpu_idle_gaps` attributed to `cudaDeviceSynchronize` | Remove explicit syncs; only sync at iteration boundaries. |
+| DataLoader bottleneck | Unchanging idle gap length across steps; high CPU util | Increase `num_workers`, use `pin_memory=True`, add prefetching. |
+| Low compute/NCCL overlap | Overlap < 30% | Enable async comms in `torch.distributed`; check backward pass for implicit syncs. |
+| NCCL outlier | Specific NCCL op duration >> median | Inspect NVLink topology; verify no PCIe fallback. |
+| PP bubble | >10ms idle gap strictly at step boundaries | Increase micro-batch count, or use interleaved 1F1B scheduling. |
+| Unnecessary H2D transfer | Massive H2D memory copies inside the training loop | Ensure tensors stay on device; check for rogue `.item()` or `.cpu()` calls. |
+| Kernel serialization | Stream concurrency = 1 (kernels operate serially) | Verify ops aren't all defaulting to Stream 0; overlap via custom CUDA streams. |
+
+**Suggested Approach**: Match findings against known patterns (e.g., via the `root_cause_matcher` skill). Consult [commands/skill.md](../commands/skill.md) for estimation tools like `speedup_estimator` to quantify potential fixes.
+
+> **Output Requirement**: After eliminating hypotheses via Stages 1-6, encode your causal chain into `/tmp/findings.json` to generate visual evidence on the `timeline-web` UI.

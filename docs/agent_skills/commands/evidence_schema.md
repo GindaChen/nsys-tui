@@ -1,6 +1,6 @@
 # Evidence Schema — Finding JSON Reference
 
-**Purpose**: When an external AI agent reaches a conclusion about a profile, it should produce a `findings.json` file that highlights the supporting timeline ranges for human verification.
+**Purpose**: When an AI agent reaches a conclusion about a profile, it should produce a `findings.json` file that highlights the supporting timeline ranges for human verification.
 
 ---
 
@@ -150,9 +150,9 @@ In the viewer:
 
 ---
 
-## External Agent End-to-End Workflow
+## End-to-End Workflow
 
-After analysis, an external AI agent should produce findings and open the web viewer.
+After analysis, an AI agent should produce findings and open the web viewer.
 Three approaches, from most control to least:
 
 ### Option A: Agent-Driven (recommended)
@@ -213,6 +213,4 @@ nsys-ai timeline-web profile.sqlite --auto-analyze
 
 > **When to use which**: Option A produces the highest-quality findings because the
 > agent reasons about root causes. Option B/C use heuristics only (no LLM reasoning).
-> External agents should prefer Option A, falling back to B/C when speed matters more
-> than explanation quality.
-
+> Option A is strongly recommended for most AI agents, falling back to Option B or C when speed matters more than custom reasoning.

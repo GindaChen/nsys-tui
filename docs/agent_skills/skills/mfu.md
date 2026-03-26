@@ -42,7 +42,7 @@ per-kernel operation. Using `full_model` FLOPs for one kernel ALWAYS gives MFU >
 ## Workflow 1: MFU for a Specific NVTX Region or Kernel
 
 ```
-Step 1  get_gpu_peak_tflops()
+Step 1  Get GPU peak TFLOPS
         If error → ask user for GPU model and consult hardware.py
 
 Step 2  Discover the target name (mandatory — never guess):
@@ -62,19 +62,13 @@ Step 3  Resolve model architecture — in this order, stop when resolved:
         C. Ask: "What model are you training? (e.g. LLaMA-7B = H=4096, L=32)"
            → End message. Wait.
 
-Step 4  compute_theoretical_flops(
-            operation=<see table above>,
-            hidden_dim=H, seq_len=S, num_layers=L
-        )
+Step 4  Compute theoretical FLOPs:
+            operation=<see table above>, hidden_dim=H, seq_len=S, num_layers=L
         → {theoretical_flops: <value>}
 
-Step 5  compute_region_mfu(
-            name="<from step 2>",
-            theoretical_flops=<from step 4>,
-            source="nvtx",          ← or "kernel" if measuring CUDA kernel directly
-            peak_tflops=<from step 1>,
-            num_gpus=<world_size, or 1 for single GPU>,
-        )
+Step 5  Compute region MFU:
+            name="<from step 2>", theoretical_flops=<from step 4>,
+            source="nvtx" (or "kernel"), peak_tflops=<from step 1>, num_gpus=<world_size>
         → {mfu_pct_wall, mfu_pct_kernel_union, wall_time_s, kernel_count, ...}
 
 Step 6  Sanity check — MANDATORY before reporting:
@@ -94,7 +88,7 @@ Step 7  Interpret in context:
 ## Workflow 2: Step-Level MFU (Whole Training Throughput)
 
 ```
-Step 1  get_gpu_peak_tflops()
+Step 1  Get GPU peak TFLOPS
 
 Step 2  Get a SINGLE representative step time (not the whole profile span):
         Option A — NVTX marker (preferred):
@@ -113,12 +107,12 @@ Step 3  Ask for model architecture:
          and whether this is forward-only, forward+backward, or with gradient checkpointing?"
         → End message. Wait. Use model table above if name is known.
 
-Step 4  compute_theoretical_flops(
+Step 4  Compute theoretical FLOPs:
             operation="full_model", hidden_dim=H, seq_len=S, num_layers=L,
             batch_size=B, multiplier=<1/3/4>
-        )
 
-Step 5  compute_mfu(step_time_s=<step 2>, model_flops_per_step=<step 4 value>, peak_tflops=<step 1>)
+Step 5  Compute standard MFU:
+            step_time_s=<step 2>, model_flops_per_step=<step 4 value>, peak_tflops=<step 1>
         → {MFU_pct, achieved_model_TFLOPS}
 
 Step 6  Contextualise:
@@ -135,7 +129,7 @@ Step 6  Contextualise:
 Before delivering MFU results, verify:
 
 - [ ] MFU between 0% and 100% (if > 100%, recompute with narrower operation)
-- [ ] `theoretical_flops` came from `compute_theoretical_flops`, not estimated by hand
+- [ ] `theoretical_flops` came from a theoretical FLOPs calculator, not estimated by hand
 - [ ] NVTX or kernel name came from a query (not guessed)
 - [ ] Step time is from a SINGLE representative iteration (not full profile kernel span)
 - [ ] `operation` matches the exact scope of the measured region/kernel

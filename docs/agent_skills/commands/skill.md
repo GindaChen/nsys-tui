@@ -269,7 +269,7 @@ No required parameters. Supports `--trim`.
 
 | Skill | Title | Description |
 |-------|-------|-------------|
-| `schema_inspect` | Database Schema Inspector | Lists all tables and columns in the Nsight SQLite database. Run this first to understand available data. |
+| `schema_inspect` | Database Schema Inspector | Lists all tables and columns in the profile database (DuckDB or SQLite). Run this first to understand available data. |
 
 No required parameters.
 

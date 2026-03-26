@@ -10,6 +10,13 @@
 You are the AI agent that operates it. You have function-call tools that query the profile,
 compute efficiency metrics, and compare runs.
 
+> **Backend**: On first open, `nsys-ai` exports the SQLite profile into a
+> DuckDB + Parquet cache (`<profile>.nsys-cache/`) for fast analysis.
+> All subsequent queries run over DuckDB views on cached Parquet files.
+> If DuckDB is unavailable, it falls back to direct SQLite automatically.
+> Use `SHOW TABLES` and `DESCRIBE <table>` for schema discovery — these
+> work portably across both backends.
+
 ---
 
 ## 5-Minute Orientation
@@ -23,21 +30,14 @@ compute efficiency metrics, and compare runs.
 
 **Never read all skill files upfront.** They are loaded on demand.
 
-### Step 2 — Know your two tool sets
+### Step 2 — Know your tools
 
-**Set A** (one profile loaded): `query_profile_db`, `get_gpu_peak_tflops`,
-`compute_theoretical_flops`, `compute_region_mfu`, `compute_mfu`, `submit_finding`,
-`get_gpu_overlap_stats`, `get_nccl_breakdown`,
-navigation tools (UI-only: `navigate_to_kernel`, `zoom_to_time_range`, `fit_nvtx_range`).
+You have two ways to interact with the profile:
+1. **High-level Analysis**: `/nsys:analyze`, `/nsys:diff`, `/nsys:mfu`
+2. **Specific Skills**: Run `nsys-ai skill run <name> profile.sqlite`.
 
-**Set B** (two profiles loaded, diff mode): `get_gpu_peak_tflops`, `compute_mfu` from Set A,
-plus diff tools: `get_iteration_boundaries`, `get_top_nvtx_diffs`, `get_iteration_diff`,
-`get_region_diff`, `search_nvtx_regions`, `get_gpu_imbalance_stats`, and more.
-Set B does NOT include `query_profile_db`, `compute_theoretical_flops`, `compute_region_mfu`,
-`submit_finding`, `get_gpu_overlap_stats`, `get_nccl_breakdown`, or navigation tools.
-
-> **Note**: Navigation tools are only available in `timeline-web` / `chat` TUI.
-> Via CLI (`nsys-ai agent ask`), provide timestamp references in text instead.
+> **Note**: Navigation tools (`navigate_to_kernel`, `zoom_to_time_range`) are UI-only.
+> Via CLI, provide timestamp references in text instead.
 
 ### Step 3 — Know the 3 non-negotiable rules
 
@@ -55,14 +55,15 @@ Set B does NOT include `query_profile_db`, `compute_theoretical_flops`, `compute
 | Add/improve a skill | `/nsys:refine` |
 | Verify your output | `/nsys:validate` |
 
-**External agents (CLI)**: Use `nsys-ai skill run <name> profile.sqlite` to run
-specific analysis skills. See [`commands/skill.md`](commands/skill.md) for the full
-catalog of 21 builtin skills.
+**Analysis Skills**: Use `nsys-ai skill run <name> profile.sqlite` to run specific
+analysis modules. See [`commands/skill.md`](commands/skill.md) for the full catalog of 21 builtin skills.
 
 > **After analysis**: Encode your conclusions as `findings.json` and open
 > `nsys-ai timeline-web profile.sqlite --findings findings.json` so the user
 > can visually verify your claims. See [`commands/evidence_schema.md`](commands/evidence_schema.md)
 > for the JSON schema and end-to-end workflow.
+
+> **Performance Note**: Running stateless CLI commands (`nsys-ai skill run`) on multi-gigabyte `.sqlite` profiles can take 30–60+ seconds per invocation due to DuckDB/SQLite cold starts and Parquet conversion. For heavy analysis workflows, batch your queries or expect high latency.
 
 ---
 
@@ -71,21 +72,21 @@ catalog of 21 builtin skills.
 When a user loads a profile with no specific question:
 
 ```
-1. Load skills/triage.md
-2. Run get_gpu_peak_tflops()
-3. Query top kernels by GPU time
-4. Check NVTX and NCCL presence
+1. Load skills/triage.md (Read the workflow guide)
+2. Parse NVTX hierarchy (e.g. via `tree` or `search`). Note: NVTX markers might be well-structured, poorly structured, or entirely missing.
+3. Query top kernels by GPU time (e.g. via `top_kernels` skill)
+4. Get GPU peak TFLOPS and NCCL presence
 5. Give a 4-line summary + ask what to investigate
 ```
 
 When a user asks "what's my MFU?":
 
 ```
-1. Load skills/mfu.md
-2. Run get_gpu_peak_tflops()
+1. Load skills/mfu.md (Read the workflow guide)
+2. Get GPU peak TFLOPS
 3. Discover NVTX/kernel names (never guess)
 4. Resolve model architecture (lookup table before asking user)
-5. compute_theoretical_flops → compute_region_mfu or compute_mfu
+5. Compute theoretical FLOPs → compute region MFU or standard MFU
 6. Sanity check: MFU must be 0–100%
 ```
 
@@ -95,7 +96,8 @@ When a user asks "what's my MFU?":
 
 | ❌ Wrong | ✅ Right |
 |---------|---------|
-| Compute FLOPs yourself | Call `compute_theoretical_flops` |
+| Compute FLOPs yourself | Use theoretical FLOPs calculator |
+| Guess skill parameters (e.g. `num_heads`) | Read `commands/skill.md` strictly for required keys/Enums |
 | Use full profile span as step_time | Use single NVTX iteration duration |
 | Use `SELECT *` | Name specific columns |
 | Guess NVTX name | Query `NVTX_EVENTS` first |

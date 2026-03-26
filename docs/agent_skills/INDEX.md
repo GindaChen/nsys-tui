@@ -2,13 +2,13 @@
 
 **Read `PRINCIPLES.md` first.** It contains the rules, error handling, and tool architecture.
 
-This file serves two audiences:
-- **External agents** (e.g. OpenClaw) → use the [CLI Quick Reference](#cli-quick-reference) below to invoke `nsys-ai` from a terminal.
-- **Internal agent** (nsys-ai's own LLM) → use the [Skill Router](#skill-router-llm-workflow-guides) to load the right `.md` file.
+This file serves as your routing guide:
+- Use the [CLI Quick Reference](#cli-quick-reference) to invoke `nsys-ai` analysis commands.
+- Use the [Skill Router](#skill-router-llm-workflow-guides) to load the right `.md` reasoning workflow.
 
 ---
 
-## CLI Quick Reference (for external agents)
+## CLI Quick Reference
 
 > **Install**: `pip install nsys-ai[ai]`
 > **Prerequisite**: An `.sqlite` profile exported from NVIDIA Nsight Systems.
@@ -63,17 +63,34 @@ nsys-ai report profile.sqlite --gpu 0 --trim 1.0 5.0 -o report.md
 
 | Command | Usage | Purpose |
 |---------|-------|---------|
-| `nsys-ai open <profile>` | Opens in Perfetto/web/TUI viewer | Quick visual inspection |
-| `nsys-ai web <profile> --gpu 0 --trim 1 5` | Serves interactive web viewer | Browser-based timeline exploration |
-| `nsys-ai timeline-web <profile>` | Serves timeline-focused web UI | Full timeline + AI chat + evidence sidebar |
+| `nsys-ai open <profile> [--gpu N] [--trim S E] [--viewer V] [--port P]` | Opens in Perfetto/web/TUI viewer | Quick visual inspection |
+| `nsys-ai web <profile> [--gpu N] [--trim S E] [--port P]` | Serves interactive web viewer | Browser-based timeline exploration |
+| `nsys-ai timeline-web <profile> [--gpu N] [--trim S E] [--port P] [--findings F] [--auto-analyze]` | Serves timeline-focused web UI | Full timeline + AI chat + evidence sidebar |
 | `nsys-ai chat <profile>` | Interactive AI chat TUI | Multi-turn analysis session |
-| `nsys-ai export <profile> --gpu 0 --trim 1 5` | Export Perfetto JSON | Post-processing / sharing |
-| `nsys-ai diff-web <before> <after>` | Web diff viewer | Visual side-by-side comparison |
-| `nsys-ai agent analyze <profile>` | Full auto-analysis report | CLI auto-analysis (no LLM needed) |
+| `nsys-ai timeline <profile> [--gpu N] [--trim S E] [--min-ms M]` | Horizontal timeline TUI | Terminal-based trace viewer |
+| `nsys-ai tui <profile> [--gpu N] [--trim S E] [--depth D] [--min-ms M]` | Tree view TUI | Hierarchical NVTX exploration |
+| `nsys-ai tree <profile> [--gpu N] [--trim S E]` | NVTX hierarchy as text | Console output of NVTX tree |
+| `nsys-ai markdown <profile> [--gpu N] [--trim S E]` | NVTX hierarchy as markdown | Markdown format of NVTX tree |
+| `nsys-ai info <profile>` | Show profile metadata and GPU info | Hardware specs and iteration counts |
+| `nsys-ai summary <profile> [--gpu N] [--trim S E]` | GPU kernel summary with top kernels | Quick hotspot overview without AI |
+| `nsys-ai overlap <profile> [--gpu N] [--trim S E]` | Compute/NCCL overlap analysis | Concurrent execution stats |
+| `nsys-ai nccl <profile> [--gpu N] [--trim S E]` | NCCL collective breakdown | Network communication profiling |
+| `nsys-ai iters <profile> [--gpu N] [--trim S E]` | Detect training iterations | Find stable steps and warmup |
+| `nsys-ai export <profile> [--gpu N] [--trim S E] [-o DIR]` | Export Perfetto JSON | Post-processing / sharing |
+| `nsys-ai perfetto <profile> [--gpu N] [--trim S E] [--port P]` | Open trace in Perfetto UI | Direct Perfetto trace viewer |
+| `nsys-ai export-json <profile> [--gpu N] [--trim S E] [-o out.json] [--summary]` | Export kernel data as flat JSON | Easy programmatic ingestion |
+| `nsys-ai export-csv <profile> [--gpu N] [--trim S E] [-o out.csv]` | Export kernel data as flat CSV | Statistical analysis pipelines |
+| `nsys-ai viewer <profile> [--gpu N] [--trim S E] [-o out.html]` | Generate interactive HTML viewer | Shareable web report |
+| `nsys-ai timeline-html <profile> [--gpu N] [--trim S E] [-o out.html]`| Generate horizontal timeline HTML | Static trace visualization |
+| `nsys-ai search <profile> -q <query> [--gpu N] [--trim S E] [--parent P] [--type T] [--limit L]` | Search kernels/NVTX by name | Fast exact name discovery |
+| `nsys-ai diff-web <before> <after> [--gpu N] [--trim S E] [--port P]` | Web diff viewer | Visual side-by-side comparison |
+| `nsys-ai agent analyze <profile> [--trim S E] [--evidence] [-o out]`| Full auto-analysis report | CLI auto-analysis (no LLM needed) |
 | `nsys-ai agent ask <profile> "<question>"` | Ask a targeted question | Keyword-based skill selection |
-| `nsys-ai skill list` | List all builtin analysis skills | Discover available skills |
-| `nsys-ai skill run <name> <profile> [--param K=V]` | Run a skill against a profile | Targeted analysis |
-| `nsys-ai skill add/remove/save`* | Manage custom skills | Extend the skill system |
+| `nsys-ai skill list [--format F]` | List all builtin analysis skills | Discover available skills |
+| `nsys-ai skill run <name> <profile> [--trim S E] [--format F] [-p K=V]` | Run a skill against a profile | Targeted analysis |
+| `nsys-ai skill add <path.md>`* | Add a custom skill | Extend the skill system |
+| `nsys-ai skill remove <name>`* | Remove a custom skill | Manage skill system |
+| `nsys-ai skill save <name> -o <out.md>`* | Export a skill to .md file | Modify/eject builtin skills |
 
 > **Builtin Skills Catalog**: See [`commands/skill.md`](commands/skill.md) for the complete
 > list of 21 builtin skills with names, categories, descriptions, and parameters.
@@ -98,7 +115,7 @@ cat analysis.md
 # Workflow 4: Visual evidence for human verification
 # See docs/agent_skills/commands/evidence_schema.md for Finding JSON format
 
-# 4a: Agent-driven evidence (recommended for external agents)
+# 4a: Agent-driven evidence (recommended)
 #     Full agent loop: collect → reason → conclude → write findings → view
 #
 #   Step 1: COLLECT — query multiple skills for raw data
@@ -145,7 +162,7 @@ nsys-ai timeline-web profile.sqlite --auto-analyze
 
 ---
 
-## Slash Commands (for nsys-ai's internal agent)
+## Slash Commands
 
 | Command | When to use |
 |---------|------------|
@@ -180,20 +197,6 @@ what tools to call.
 
 ---
 
-## Tool Sets
-
-### Set A — Single Profile
-`query_profile_db` · `get_gpu_peak_tflops` · `compute_theoretical_flops` · `compute_region_mfu` · `compute_mfu` · `submit_finding` · `get_gpu_overlap_stats` · `get_nccl_breakdown` · `navigate_to_kernel`* · `zoom_to_time_range`* · `fit_nvtx_range`*
-
-*\* UI-only — available in `timeline-web` and `chat` TUI, not via CLI.*
-
-### Set B — Diff Mode (two profiles loaded)
-`get_gpu_peak_tflops` · `compute_mfu` from Set A, plus:
-`search_nvtx_regions` · `get_iteration_boundaries` · `explore_nvtx_hierarchy` · `get_top_nvtx_diffs` · `get_iteration_diff` · `get_region_diff` · `summarize_nvtx_subtree` · `get_launch_config_diff` · `get_source_code_context` · `get_gpu_imbalance_stats` · `get_global_diff` · `get_memory_profile_diff`
-
-*Set B does NOT include `query_profile_db`, `compute_theoretical_flops`, `compute_region_mfu`, `submit_finding`, `get_gpu_overlap_stats`, `get_nccl_breakdown`, or navigation tools.*
-
----
 
 ## Adding a New Skill
 
