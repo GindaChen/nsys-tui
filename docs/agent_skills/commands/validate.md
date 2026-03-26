@@ -33,8 +33,8 @@ Produce a scored report. **Do not skip any category.**
 ### Category 1: Correctness of Values (10 checks)
 
 - [ ] C1.1 MFU is between 0% and 100% (inclusive)
-- [ ] C1.2 `theoretical_flops` came from `compute_theoretical_flops`, not from manual arithmetic
-- [ ] C1.3 `peak_tflops` came from `get_gpu_peak_tflops()` or is explicitly provided by user
+- [ ] C1.2 `theoretical_flops` came from a theoretical FLOPs calculator, not from manual arithmetic
+- [ ] C1.3 `peak_tflops` came from GPU info query or is explicitly provided by user
 - [ ] C1.4 `operation` parameter matches the exact scope of the measured region/kernel
 - [ ] C1.5 `num_layers` used in FLOPs calculation matches the actual model layer count
 - [ ] C1.6 `multiplier` matches the training mode (1=fwd, 3=fwd+bwd, 4=fwd+bwd+ckpt)
@@ -47,19 +47,19 @@ Produce a scored report. **Do not skip any category.**
 
 - [ ] C2.1 NVTX region name was discovered by querying `NVTX_EVENTS`, not guessed
 - [ ] C2.2 Kernel name was discovered by querying `StringIds`, not guessed
-- [ ] C2.3 `search_nvtx_regions` was called before `get_region_diff` in diff mode
+- [ ] C2.3 NVTX regions were searched before running region diff in diff mode
 - [ ] C2.4 The discovered name substring actually matches the intended target
 - [ ] C2.5 `source="nvtx"` vs `source="kernel"` was set correctly for the target type
 
 ### Category 3: Diff Analysis (8 checks)
 
-- [ ] C3.1 `get_iteration_boundaries()` was called first in diff mode
+- [ ] C3.1 Iteration boundaries were detected first in diff mode
 - [ ] C3.2 Iteration index 0 was skipped (JIT warmup)
-- [ ] C3.3 `is_aligned=false` was flagged and `get_global_diff` used instead
+- [ ] C3.3 `is_aligned=false` was flagged and global diff used instead
 - [ ] C3.4 JIT_Compilation_Warning was checked and handled
 - [ ] C3.5 Hardware_Warning (thermal throttle) was noted if present
 - [ ] C3.6 Root cause statement includes: cause, evidence field+delta value, recommendation
-- [ ] C3.7 NCCL regression was followed up with `get_gpu_imbalance_stats`
+- [ ] C3.7 NCCL regression was followed up with GPU imbalance stats
 - [ ] C3.8 Profile with ≤1 iteration was flagged as too short (not silently used)
 
 ### Category 4: SQL Quality (7 checks)
@@ -82,9 +82,9 @@ Produce a scored report. **Do not skip any category.**
 
 ### Category 6: Tool Usage (5 checks)
 
-- [ ] C6.1 Only Set A tools used when single profile is loaded
-- [ ] C6.2 Only Set B tools used in diff mode
-- [ ] C6.3 `compute_theoretical_flops` result passed directly to next tool (not re-typed)
+- [ ] C6.1 Only single-profile analysis tools (e.g. `compute_theoretical_flops`, `compute_region_mfu`, `navigate_to_kernel`, `fit_nvtx_range`) used when a single profile is loaded
+- [ ] C6.2 Only diff-mode tools (e.g. `get_iteration_diff`, `get_top_nvtx_diffs`) used when comparing two profiles
+- [ ] C6.3 `theoretical_flops` passed directly to next analysis step (not re-typed)
 - [ ] C6.4 `navigate_to_kernel` / `fit_nvtx_range` used correctly when navigation was needed
 - [ ] C6.5 No tool was called with parameters that weren't derived from profile data
 
@@ -122,7 +122,7 @@ For each claim, re-run independently:
 | Claim type | Re-run |
 |-----------|--------|
 | MFU value | `compute_theoretical_flops` → `compute_region_mfu` with same params |
-| Diff delta | `get_iteration_diff(iteration_index=N)` → read same field |
+| Diff delta | Iteration diff (iteration_index=N) → read same field |
 | NCCL claim | Query `CUPTI_ACTIVITY_KIND_KERNEL WHERE LIKE '%nccl%'` fresh |
 | Root cause | `get_top_nvtx_diffs` + `get_iteration_diff` signals |
 

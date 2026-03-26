@@ -40,7 +40,7 @@ Read this when you need to query the profile database, or for help with a specif
 | `NVTX_EVENTS` | `start`, `[end]`, `text` (or `textId`→StringIds), `globalTid` | Use COALESCE when textId present |
 | `StringIds` | `id`(int), `value`(string) | Maps integer IDs to human-readable names |
 | `CUPTI_ACTIVITY_KIND_RUNTIME` | `correlationId`, `start`, `[end]`, `globalTid` | CPU-side CUDA API; links to kernel via correlationId |
-| `TARGET_INFO_GPU` | GPU hardware info | Source for `get_gpu_peak_tflops()` |
+| `TARGET_INFO_GPU` | GPU hardware info | GPU name, compute capability, etc. |
 | `CUDA_GPU_MEMORY_USAGE_EVENTS` | Memory alloc/free | Only if `--cuda-memory-usage=true` was used |
 | `CUPTI_ACTIVITY_KIND_SOURCE_LOCATOR` | Source file + line | Only if source profiling enabled |
 
@@ -120,14 +120,22 @@ GROUP BY k.shortName ORDER BY ms DESC LIMIT 20
 
 ## Schema Discovery
 
+> **⚠️ PRAGMA is blocked by `query_profile_db`.** The read-only guard rejects PRAGMA
+> statements. Use `DESCRIBE <table>` instead (it is automatically rewritten to
+> `PRAGMA table_info('<table_name>')` internally). Or use the `schema_inspect` builtin skill.
+
 ```sql
 -- All tables in this profile
 SHOW TABLES
 
--- Columns in a table
+-- Columns in a table (use DESCRIBE, not PRAGMA)
 DESCRIBE CUPTI_ACTIVITY_KIND_KERNEL
 
 -- Check if NVTX uses textId (newer) or text (older)
 DESCRIBE NVTX_EVENTS
 -- If 'textId' column present → JOIN StringIds; else use n.text directly
 ```
+
+> **Note**: DuckDB profiles use `SHOW TABLES` and `DESCRIBE` natively.
+> The `schema_inspect` skill handles both SQLite and DuckDB backends automatically.
+> Example usage: `nsys-ai skill run schema_inspect profile.sqlite` for discovery.

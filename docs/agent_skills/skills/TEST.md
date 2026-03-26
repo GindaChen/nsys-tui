@@ -14,7 +14,7 @@ Analogous to `TEST.md` in CLI-Anything harnesses.
 | CLI entry point | `test_cli.py` | `python -m nsys_ai --help`, subcommands |
 | Agent / chat loop | `test_chat.py` | Tool calls, prompt building, agent loop |
 | Region MFU | `test_region_mfu.py` | `compute_region_mfu`, `compute_theoretical_flops` |
-| Diff tools | `test_diff.py` | `get_iteration_diff`, `get_top_nvtx_diffs`, etc. |
+| Diff tools | `test_diff.py` | `get_iteration_diff`, `top_nvtx_diffs`, etc. |
 | Tree logic | `test_tree_logic.py` | NVTX tree build, filter, collapse |
 | TUI snapshots | `test_tui_snapshots.py` | Terminal UI visual regression |
 | TUI timeline app | `test_tui_timeline_app.py` | Timeline zoom, pan, stream select |

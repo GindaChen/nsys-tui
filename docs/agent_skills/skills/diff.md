@@ -11,7 +11,7 @@ You have access to before/after SQLite profiles and MUST use the following rules
 
 1. **Never guess names** — Call `search_nvtx_regions` or `explore_nvtx_hierarchy` to get exact NVTX/kernel strings before any diff call.
 2. **Wall-clock vs kernel sum** — If they diverge, conclude stream serialization or external sync, not kernel regression.
-3. **Explain "why"** — For regressed kernels, call `get_launch_config_diff` when available; if kernel sped up with no config change, check `uses_tensor_core_likely`.
+3. **Explain "why"** — For regressed kernels, use `get_launch_config_diff` when available; if kernel sped up with no config change, check `uses_tensor_core_likely`.
 4. **Strict modality (nsys, not ncu)** — No cache hit rate, bandwidth, or bank-conflict claims; tell user to use Nsight Compute for those.
 5. **NCCL spike → imbalance first** — Not "network"; use `get_gpu_imbalance_stats` to prove; if within-node GPUs are balanced but NCCL still high, conclude cross-node delay.
 6. **Idle spike → CPU starvation** — If iteration slower but sum_of_kernels_ms unchanged and idle spiked, steer toward DataLoader / Python overhead.
@@ -19,7 +19,7 @@ You have access to before/after SQLite profiles and MUST use the following rules
 8. **Hardware_Warning present** — Prefer thermal/power explanation before software regression.
 9. **Workload_Mismatch_Warning** — Do not draw a performance conclusion; tell user the input dimensions may differ.
 10. **Impact ratio** — Check `pct_of_iteration_time` and `contribution_to_total_delta_pct`; if regression is <1% of iteration time, classify as Negligible Variance.
-11. **MFU** — Only when the user explicitly asks for MFU, utilization, or efficiency metrics. Then: (1) Get step_time_s from `get_iteration_diff` (wall_clock_ms/1000) or `get_global_diff`. (2) Call `get_gpu_peak_tflops`. (3) Ask the user for model_flops_per_step. **Do NOT call compute_mfu until the user has provided model_flops_per_step.** (4) For before/after: call compute_mfu twice and synthesize (e.g. "MFU before 35%, after 75%, +40%").
+11. **MFU** — Only when the user explicitly asks for MFU, utilization, or efficiency metrics. Then: (1) Get step_time_s from the iteration diff (wall_clock_ms/1000) or global diff. (2) Get GPU peak TFLOPS. (3) Ask the user for model_flops_per_step. **Do NOT compute MFU until the user has provided model_flops_per_step.** (4) For before/after: compute MFU twice and synthesize (e.g. "MFU before 35%, after 75%, +40%").
 
 ---
 
@@ -29,7 +29,7 @@ You have access to before/after SQLite profiles and MUST use the following rules
 > and it's now slower. They want WHY and HOW TO FIX IT, not just where.
 
 ```
-Step 1  get_iteration_boundaries()
+Step 1  Use `get_iteration_boundaries`
         → {is_aligned, iteration_count_before, iteration_count_after, boundaries}
 
         DECIDE STRATEGY based on what you get:
@@ -40,17 +40,17 @@ Step 1  get_iteration_boundaries()
         │ is_aligned, count = 2           │ Use index 1; note single-iteration caveat  │
         │ is_aligned, count = 1           │ Profile too short! Ask user to re-profile  │
         │ is_aligned=false                │ Warn user: workloads differ. Use           │
-        │                                 │ get_global_diff(skip_first_ms=2000) instead│
+        │                                 │ Global diff (skip_first_ms=2000) instead   │
         └─────────────────────────────────┴────────────────────────────────────────────┘
 
-Step 2  get_top_nvtx_diffs(limit=20)
+Step 2  Use `get_top_nvtx_diffs` (limit=20)
         → Hotspot radar. Classify the pattern before diving in:
         • Compute delta large, Memcpy unchanged → pure kernel regression
         • Idle spiked, kernel sum unchanged     → CPU bottleneck (DataLoader / GIL)
         • NCCL delta large                      → communication change → read skills/distributed.md
         • Many small changes, no dominant delta → broad config change (batch size, seq len)
 
-Step 3  get_iteration_diff(iteration_index=<stable N, not 0>)
+Step 3  Use `get_iteration_diff` (for stable N, not 0)
         KEY SIGNALS:
         ┌────────────────────────────────────────┬────────────────────────────────────────┐
         │ Signal                                 │ Diagnosis                              │
@@ -65,22 +65,22 @@ Step 3  get_iteration_diff(iteration_index=<stable N, not 0>)
         └────────────────────────────────────────┴────────────────────────────────────────┘
 
 Step 4  [If specific kernel/region changed] Micro-drill:
-        search_nvtx_regions(query="<keyword>")  ← REQUIRED before get_region_diff
+        `search_nvtx_regions`(query="<keyword>")  ← REQUIRED before region diff
         → get exact NVTX name strings
-        get_region_diff(nvtx_exact_match="<exact>")
+        `get_region_diff`(nvtx_exact_match="<exact>")
         → region-level wall_clock_ms, top_regressions, classification
         Ask user: "Did you change anything related to <regressed region>?"
 
 Step 5  [If NCCL regressed] read skills/distributed.md
-        Then: get_gpu_imbalance_stats(iteration_index=<N>)
+        Then: Use `get_gpu_imbalance_stats`(iteration_index=<N>)
         Ask: "Did you change the number of GPUs, parallelism strategy, or network config?"
 
 Step 6  [Optional deep-dive tools]
-        • explore_nvtx_hierarchy(parent_path=...)         → navigate NVTX subtree
-        • summarize_nvtx_subtree(parent_path="<region>")  → roll up child deltas
-        • get_launch_config_diff(kernel_name=...)         → grid/block config change
-        • get_source_code_context(nvtx_path=...)          → file:line for code handoff
-        • get_global_diff(skip_first_ms=2000)             → fallback when no NVTX markers
+        • `explore_nvtx_hierarchy`(parent_path=...)         → navigate NVTX subtree
+        • `summarize_nvtx_subtree`(parent_path="<region>")  → roll up child deltas
+        • `get_launch_config_diff`(kernel_name=...)         → grid/block config change
+        • `get_source_code_context`(nvtx_path=...)          → file:line for code handoff
+        • `get_global_diff`(skip_first_ms=2000)             → fallback when no NVTX markers
 
 Step 7  REQUIRED final statement:
         "The regression is caused by <X>.
@@ -97,14 +97,14 @@ Step 7  REQUIRED final statement:
 *Only when user explicitly asks about efficiency delta — do not proactively offer.*
 
 ```
-Step 1  get_iteration_boundaries() → pick stable iteration (not index 0)
-Step 2  get_iteration_diff(iteration_index=<N>)
+Step 1  Use `get_iteration_boundaries` → pick stable iteration (not index 0)
+Step 2  Use `get_iteration_diff`(iteration_index=<N>)
         → step_time_before_s = wall_clock_ms.before / 1000
            step_time_after_s  = wall_clock_ms.after  / 1000
-Step 3  get_gpu_peak_tflops()
+Step 3  Use `get_gpu_peak_tflops`
 Step 4  Resolve model architecture: use lookup table in skills/mfu.md first
-Step 5  compute_theoretical_flops(operation="full_model", multiplier=<3 or 4>, ...)
-Step 6  compute_mfu(before) and compute_mfu(after)
+Step 5  Use `compute_theoretical_flops`(operation="full_model", multiplier=<3 or 4>, ...)
+Step 6  Use `compute_mfu` for both before and after profiles
         Report: "MFU: before 35% → after 51% (+16pp)"
         Contextualise using reference ranges in skills/mfu.md Workflow 2 Step 6.
 ```
