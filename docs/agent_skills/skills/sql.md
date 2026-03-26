@@ -126,7 +126,7 @@ GROUP BY k.shortName ORDER BY ms DESC LIMIT 20
 
 ```sql
 -- All tables in this profile
-SELECT name FROM sqlite_master WHERE type='table' ORDER BY name
+SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name
 
 -- Columns in a table (use DESCRIBE, not PRAGMA)
 DESCRIBE CUPTI_ACTIVITY_KIND_KERNEL
@@ -137,5 +137,6 @@ DESCRIBE NVTX_EVENTS
 ```
 
 > **Note**: DuckDB profiles use `SHOW TABLES` and `DESCRIBE` natively.
-> The `schema_inspect` skill handles both backends automatically —
-> prefer `nsys-ai skill run schema_inspect profile.sqlite` for discovery.
+> The `schema_inspect` skill handles both backends automatically.
+> Internal agents should call the `schema_inspect` skill directly.
+> External agents (CLI) can run: `nsys-ai skill run schema_inspect profile.sqlite` for discovery.

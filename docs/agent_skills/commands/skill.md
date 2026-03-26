@@ -134,13 +134,15 @@ Parameters marked **required** must be provided via `--param`.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|:--------:|---------|-------------|
 | `operation` | str | ✅ | — | `attention` / `qkv_proj` / `output_proj` / `mlp` / `full_layer` / `full_model` / `linear` |
-| `hidden_dim` | int | | 0 | Model hidden dimension (H) |
-| `seq_len` | int | | 0 | Sequence length (S) |
+| `hidden_dim` | int | ✅* | 0 | Model hidden dimension (H) |
+| `seq_len` | int | ✅* | 0 | Sequence length (S) |
 | `num_layers` | int | | 1 | Number of transformer layers |
 | `ffn_dim` | int | | 4×H | FFN intermediate dimension |
 | `batch_size` | int | | 1 | Batch size |
 | `multiplier` | int | | 1 | 1=fwd, 3=fwd+bwd, 4=fwd+bwd+ckpt |
 | `M` / `N` / `K` | int | | 0 | For `linear` operation: matrix dimensions |
+
+\* `hidden_dim` and `seq_len` must be > 0 for all operations except `linear` (which uses `M`/`N`/`K` instead). Passing 0 returns an `INVALID_ARGUMENT` error.
 
 ---
 
