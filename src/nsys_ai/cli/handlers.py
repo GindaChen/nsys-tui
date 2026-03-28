@@ -621,6 +621,7 @@ def _cmd_skill(args, _profile):
         import sqlite3
 
         import duckdb
+
         from nsys_ai.parquet_cache import open_cached_db
 
         fmt = getattr(args, "format", "text")

@@ -128,14 +128,15 @@ def test_skill_run_duckdb_cache(tmp_path):
         CREATE TABLE CUPTI_ACTIVITY_KIND_KERNEL (
             start INTEGER, "end" INTEGER, deviceId INTEGER,
             streamId INTEGER, correlationId INTEGER,
-            shortName TEXT, mangledName TEXT
+            shortName INTEGER, mangledName TEXT, demangledName INTEGER
         );
         INSERT INTO CUPTI_ACTIVITY_KIND_KERNEL VALUES
-            (1000, 2000, 0, 7, 1, 'kernel_a', 'kernel_a');
+            (1000, 2000, 0, 7, 1, 1, 'kernel_a', 1);
         CREATE TABLE StringIds (id INTEGER PRIMARY KEY, value TEXT);
+        INSERT INTO StringIds VALUES (1, 'kernel_a');
         CREATE TABLE NVTX_EVENTS (
             start INTEGER, "end" INTEGER, globalTid INTEGER,
-            text TEXT, textId INTEGER, eventType INTEGER
+            text TEXT, textId INTEGER, eventType INTEGER, rangeId INTEGER
         );
     """)
     conn.close()
@@ -152,11 +153,9 @@ def test_skill_run_duckdb_cache(tmp_path):
     table_names = {r.get("table_name") for r in rows}
     assert "kernels" in table_names or "CUPTI_ACTIVITY_KIND_KERNEL" in table_names
 
-    # If DuckDB cache was built, verify the cache directory has .parquet files.
-    # The cache may not be built if the DuckDB SQLite extension is unavailable,
-    # in which case the handler falls back to raw sqlite3 — that is also OK.
+    # Verify the DuckDB/Parquet cache was actually built (not the SQLite fallback)
     cache_dir = db_path.with_suffix(".nsys-cache")
-    if cache_dir.exists():
-        parquet_files = list(cache_dir.glob("*.parquet"))
-        assert len(parquet_files) >= 1, "Cache dir exists but contains no .parquet files"
+    assert cache_dir.exists(), f"Cache directory {cache_dir} was not created"
+    parquet_files = list(cache_dir.glob("*.parquet"))
+    assert len(parquet_files) >= 1, "No .parquet files found in cache directory"
 
