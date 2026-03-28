@@ -627,8 +627,12 @@ def _cmd_skill(args, _profile):
         fmt = getattr(args, "format", "text")
         try:
             conn = open_cached_db(args.profile)
-        except Exception:
+        except (duckdb.Error, RuntimeError, OSError) as exc:
             # Fallback to raw SQLite if DuckDB/Parquet cache fails
+            import logging
+            logging.getLogger("nsys_ai").warning(
+                "DuckDB cache unavailable (%s), falling back to raw SQLite", exc
+            )
             conn = sqlite3.connect(args.profile)
 
         # Build trim kwargs if --trim was provided
