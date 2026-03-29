@@ -92,15 +92,15 @@ def overlap_analysis(prof: Profile, device: int, trim: tuple[int, int] | None = 
     total_ns = span_end - span_start
 
     # Merge overlapping intervals within each category
-    compute_merged = _merge_intervals(compute_intervals)
-    nccl_merged = _merge_intervals(nccl_intervals)
+    compute_merged = merge_intervals(compute_intervals)
+    nccl_merged = merge_intervals(nccl_intervals)
 
     # Calculate coverage
-    compute_ns = _total_covered(compute_merged)
-    nccl_ns = _total_covered(nccl_merged)
+    compute_ns = total_covered(compute_merged)
+    nccl_ns = total_covered(nccl_merged)
 
     # Overlap = time covered by BOTH compute and NCCL
-    overlap_ns = _intersection_coverage(compute_merged, nccl_merged)
+    overlap_ns = intersection_coverage(compute_merged, nccl_merged)
 
     compute_only_ns = compute_ns - overlap_ns
     nccl_only_ns = nccl_ns - overlap_ns
@@ -356,7 +356,7 @@ def detect_iterations(
 # ── Interval math helpers ──────────────────────────────────────────
 
 
-def _merge_intervals(intervals):
+def merge_intervals(intervals):
     """Merge overlapping intervals into non-overlapping set."""
     if not intervals:
         return []
@@ -370,12 +370,12 @@ def _merge_intervals(intervals):
     return merged
 
 
-def _total_covered(merged):
+def total_covered(merged):
     """Total time covered by merged intervals."""
     return sum(end - start for start, end in merged)
 
 
-def _intersection_coverage(a, b):
+def intersection_coverage(a, b):
     """Total time covered by the intersection of two merged interval sets."""
     if not a or not b:
         return 0

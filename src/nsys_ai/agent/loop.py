@@ -41,14 +41,17 @@ class Agent:
         "h2d": ["memory_transfers", "memory_bandwidth"],
         "copy": ["memory_transfers", "memory_bandwidth"],
         "bandwidth": ["memory_bandwidth"],
-        "nccl": ["nccl_breakdown", "overlap_breakdown", "nccl_anomaly"],
+        "nccl": ["nccl_breakdown", "overlap_breakdown", "kernel_overlap_matrix", "nccl_anomaly"],
         "allreduce": ["nccl_breakdown", "nccl_anomaly"],
         "collective": ["nccl_breakdown", "nccl_anomaly"],
-        "distributed": ["nccl_breakdown", "overlap_breakdown", "nccl_anomaly"],
-        "multi-gpu": ["nccl_breakdown", "overlap_breakdown"],
+        "distributed": ["nccl_breakdown", "overlap_breakdown", "kernel_overlap_matrix", "nccl_anomaly"],
+        "multi-gpu": ["nccl_breakdown", "overlap_breakdown", "kernel_overlap_matrix"],
         "anomaly": ["nccl_anomaly"],
         "outlier": ["nccl_anomaly"],
-        "overlap": ["overlap_breakdown"],
+        "overlap": ["overlap_breakdown", "kernel_overlap_matrix"],
+        "matrix": ["kernel_overlap_matrix"],
+        "contention": ["kernel_overlap_matrix", "stream_concurrency"],
+        "hidden": ["kernel_overlap_matrix", "overlap_breakdown"],
         "nvtx": ["nvtx_kernel_map", "nvtx_layer_breakdown"],
         "source": ["nvtx_kernel_map"],
         "attribution": ["nvtx_kernel_map"],
@@ -117,14 +120,19 @@ class Agent:
         """Run a full auto-analysis of the profile.
 
         Executes the core skills in order:
-        1. top_kernels — identify hotspots
-        2. gpu_idle_gaps — find pipeline bubbles
-        3. memory_transfers — check data movement
-        4. nccl_breakdown — check collective overhead (if present)
-        5. kernel_launch_overhead — check dispatch latency
-        6. overlap_breakdown — compute/NCCL overlap analysis
-        7. iteration_timing — per-iteration timing
-        8. nvtx_layer_breakdown — per-NVTX-region GPU time
+        1. top_kernels
+        2. gpu_idle_gaps
+        3. memory_transfers
+        4. memory_bandwidth
+        5. nccl_breakdown
+        6. nccl_anomaly
+        7. kernel_launch_overhead
+        8. kernel_launch_pattern
+        9. stream_concurrency
+        10. overlap_breakdown
+        11. kernel_overlap_matrix
+        12. iteration_timing
+        13. nvtx_layer_breakdown
 
         Returns:
             Formatted multi-section report with optional AI synthesis.
@@ -147,6 +155,7 @@ class Agent:
             "kernel_launch_pattern",
             "stream_concurrency",
             "overlap_breakdown",
+            "kernel_overlap_matrix",
             "iteration_timing",
             "nvtx_layer_breakdown",
         ]

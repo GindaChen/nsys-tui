@@ -20,8 +20,9 @@ Step 1  Confirm NCCL activity + breakdown by operation:
         WHERE LOWER(s.value) LIKE '%nccl%'
         GROUP BY op ORDER BY total_ms DESC LIMIT 10
 
-Step 2  Read overlap_pct:
+Step 2  Read overlap_pct and Overlap Matrix:
         [Single profile] Use `get_gpu_overlap_stats` — returns per-GPU overlap_pct.
+                         Run `kernel_overlap_matrix` to identify EXACTLY which NCCL collective overlaps (or contends) with which compute/memcpy operation. This provides a pairwise matrix (e.g., Comm×Comm, Comm×Compute).
         [Diff context]   Use `get_iteration_diff` — overlap_pct for before/after.
 
         overlap_pct = fraction of NCCL time that overlaps with compute kernels × 100
