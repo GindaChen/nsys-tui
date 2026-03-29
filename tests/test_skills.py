@@ -10,7 +10,7 @@ def test_list_skills():
     from nsys_ai.skills import list_skills
 
     names = list_skills()
-    assert len(names) == 22
+    assert len(names) == len(expected)
 
     expected = [
         "cpu_gpu_pipeline",

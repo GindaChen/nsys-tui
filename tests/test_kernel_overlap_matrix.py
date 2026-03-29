@@ -15,7 +15,9 @@ from nsys_ai.skills.registry import get_skill
 
 @pytest.fixture
 def overlap_skill():
-    return get_skill("kernel_overlap_matrix")
+    skill = get_skill("kernel_overlap_matrix")
+    assert skill is not None, "kernel_overlap_matrix skill is not registered or could not be discovered"
+    return skill
 
 
 def _find_pair(rows, cat_a, cat_b):

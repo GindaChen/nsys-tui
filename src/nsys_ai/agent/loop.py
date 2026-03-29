@@ -120,14 +120,19 @@ class Agent:
         """Run a full auto-analysis of the profile.
 
         Executes the core skills in order:
-        1. top_kernels — identify hotspots
-        2. gpu_idle_gaps — find pipeline bubbles
-        3. memory_transfers — check data movement
-        4. nccl_breakdown — check collective overhead (if present)
-        5. kernel_launch_overhead — check dispatch latency
-        6. overlap_breakdown — compute/NCCL overlap analysis
-        7. iteration_timing — per-iteration timing
-        8. nvtx_layer_breakdown — per-NVTX-region GPU time
+        1. top_kernels
+        2. gpu_idle_gaps
+        3. memory_transfers
+        4. memory_bandwidth
+        5. nccl_breakdown
+        6. nccl_anomaly
+        7. kernel_launch_overhead
+        8. kernel_launch_pattern
+        9. stream_concurrency
+        10. overlap_breakdown
+        11. kernel_overlap_matrix
+        12. iteration_timing
+        13. nvtx_layer_breakdown
 
         Returns:
             Formatted multi-section report with optional AI synthesis.

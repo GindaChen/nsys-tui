@@ -1,6 +1,6 @@
 """Kernel overlap matrix — pairwise overlap between kernel categories.
 
-Computes comm×comm, comm×compute, compute×compute overlap matrices.
+Computes comm×comm and comm×compute overlap matrices.
 Includes memcpy (H2D/D2H/D2D) for data-movement contention analysis.
 
 This is a Python-level skill (execute_fn) because it needs interval
@@ -226,7 +226,7 @@ SKILL = Skill(
     title="Kernel Overlap Matrix",
     description=(
         "Computes pairwise overlap between kernel categories: "
-        "comm×comm, comm×compute, compute×compute, and memcpy. "
+        "comm×comm, comm×compute, and memcpy. "
         "Shows how much NCCL communication is hidden behind compute, "
         "whether different collectives contend with each other, "
         "and whether data transfers overlap with GPU work. "
