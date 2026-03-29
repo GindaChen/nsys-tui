@@ -123,10 +123,14 @@ def overlap_analysis(prof: Profile, device: int, trim: tuple[int, int] | None = 
 
 def nccl_breakdown(prof: Profile, device: int, trim: tuple[int, int] | None = None) -> list[dict]:
     """
-    Break down NCCL operations by collective type.
+    Break down NCCL operations by stream and collective type.
 
-    Returns a list sorted by total time, each:
-        {type, count, total_ms, avg_ms, min_ms, max_ms, pct}
+    Returns a list sorted by stream_id (ascending) then total time (descending), each:
+        {stream_id, type, count, total_ms, avg_ms, min_ms, max_ms, pct}
+
+    The ``pct`` field is relative to total NCCL time across all streams,
+    allowing direct cross-stream comparison to identify which parallelism
+    dimension (TP/PP/DP) dominates communication cost.
     """
     kernels = prof.kernels(device, trim)
     nccl_kernels = [k for k in kernels if classify_kernel(k["name"]).startswith("nccl_")]
@@ -136,17 +140,22 @@ def nccl_breakdown(prof: Profile, device: int, trim: tuple[int, int] | None = No
 
     total_nccl_ns = sum(k["end"] - k["start"] for k in nccl_kernels)
 
-    by_type = defaultdict(list)
+    # Group by (stream_id, collective_type)
+    by_stream_type: dict[tuple[int, str], list[int]] = defaultdict(list)
     for k in nccl_kernels:
         ctype = classify_kernel(k["name"])
         dur_ns = k["end"] - k["start"]
-        by_type[ctype].append(dur_ns)
+        by_stream_type[(k["streamId"], ctype)].append(dur_ns)
 
     result = []
-    for ctype, durs in sorted(by_type.items(), key=lambda x: -sum(x[1])):
+    for (stream_id, ctype), durs in sorted(
+        by_stream_type.items(),
+        key=lambda x: (x[0][0], -sum(x[1])),  # stream asc, total desc
+    ):
         total = sum(durs)
         result.append(
             {
+                "stream_id": stream_id,
                 "type": ctype.replace("nccl_", ""),
                 "count": len(durs),
                 "total_ms": round(total / 1e6, 2),
@@ -413,16 +422,31 @@ def format_overlap(result: dict) -> str:
 
 
 def format_nccl(breakdown: list[dict]) -> str:
-    """Format NCCL breakdown as readable text."""
+    """Format NCCL breakdown as readable text, grouped by stream."""
     if not breakdown:
         return "No NCCL collectives found"
     lines = ["NCCL Collective Breakdown"]
-    for b in breakdown:
-        lines.append(
-            f"  {b['type']:20s}  {b['pct']:5.1f}%  "
-            f"{b['total_ms']:8.1f}ms  ×{b['count']:<3d}  "
-            f"avg={b['avg_ms']:.1f}ms  [{b['min_ms']:.1f}–{b['max_ms']:.1f}ms]"
-        )
+
+    # Group by stream_id (if present)
+    has_streams = "stream_id" in breakdown[0]
+    if has_streams:
+        from itertools import groupby
+
+        for stream_id, group in groupby(breakdown, key=lambda b: b["stream_id"]):
+            lines.append(f"  [Stream {stream_id}]")
+            for b in group:
+                lines.append(
+                    f"    {b['type']:20s}  {b['pct']:5.1f}%  "
+                    f"{b['total_ms']:8.1f}ms  ×{b['count']:<3d}  "
+                    f"avg={b['avg_ms']:.1f}ms  [{b['min_ms']:.1f}–{b['max_ms']:.1f}ms]"
+                )
+    else:
+        for b in breakdown:
+            lines.append(
+                f"  {b['type']:20s}  {b['pct']:5.1f}%  "
+                f"{b['total_ms']:8.1f}ms  ×{b['count']:<3d}  "
+                f"avg={b['avg_ms']:.1f}ms  [{b['min_ms']:.1f}–{b['max_ms']:.1f}ms]"
+            )
     return "\n".join(lines)
 
 
