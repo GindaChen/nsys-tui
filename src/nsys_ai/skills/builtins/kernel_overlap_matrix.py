@@ -47,10 +47,10 @@ WHERE deviceId = ?"""
 
 def _execute(conn, **kwargs):
     from ...overlap import (
+        classify_kernel,
         intersection_coverage,
         merge_intervals,
         total_covered,
-        classify_kernel,
     )
     from ...profile import Profile
 
