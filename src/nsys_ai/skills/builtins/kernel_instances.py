@@ -30,7 +30,7 @@ def _execute(conn, **kwargs):
     trim_start = kwargs.get("trim_start_ns")
     trim_end = kwargs.get("trim_end_ns")
     if trim_start is not None and trim_end is not None:
-        where_extra += " AND k.start >= ? AND k.[end] <= ?"
+        where_extra += " AND k.[end] >= ? AND k.start <= ?"
         params.extend([int(trim_start), int(trim_end)])
 
     params.append(limit)

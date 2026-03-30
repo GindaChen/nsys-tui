@@ -92,8 +92,11 @@ LIMIT {limit}"""
     except (sqlite3.Error, duckdb.Error):
         pass
 
-    rows[0]["_anomalies"] = anomalies
-    rows[0]["device_id"] = device
+    rows.append({
+        "_metadata": True,
+        "anomalies": anomalies,
+        "device_id": device
+    })
     return rows
 
 
@@ -103,8 +106,9 @@ def _to_findings(rows: list[dict]) -> list:
     if not rows:
         return findings
 
-    anomalies = rows[0].get("_anomalies", [])
-    device = rows[0].get("device_id", 0)
+    meta = next((r for r in rows if r.get("_metadata")), {})
+    anomalies = meta.get("anomalies", [])
+    device = meta.get("device_id", 0)
 
     for r in anomalies:
         kind = _COPY_KIND_NAMES.get(r["copyKind"], f"Kind{r['copyKind']}")
@@ -157,6 +161,8 @@ def _format(rows):
         "─" * 65,
     ]
     for r in rows:
+        if r.get("_metadata"):
+            continue
         kind = _COPY_KIND_NAMES.get(r["copyKind"], f"Kind{r['copyKind']}")
         lines.append(
             f"{kind:<10s} {r['op_count']:>7d} {r['total_mb']:>10.2f} "

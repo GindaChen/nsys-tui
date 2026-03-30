@@ -741,9 +741,14 @@ def _cmd_skill(args, _profile):
                 )
                 sys.exit(1)
             it = iters[iteration_n]
-            # gpu_start_s / gpu_end_s are in SECONDS → convert to ns
-            trim_kwargs["trim_start_ns"] = int(it["gpu_start_s"] * 1e9)
-            trim_kwargs["trim_end_ns"] = int(it["gpu_end_s"] * 1e9)
+            # Prefer nanosecond fields if available; fall back to seconds -> ns conversion.
+            if "gpu_start_ns" in it and "gpu_end_ns" in it:
+                trim_kwargs["trim_start_ns"] = int(it["gpu_start_ns"])
+                trim_kwargs["trim_end_ns"] = int(it["gpu_end_ns"])
+            else:
+                # gpu_start_s / gpu_end_s are in SECONDS -> convert to ns
+                trim_kwargs["trim_start_ns"] = int(it["gpu_start_s"] * 1e9)
+                trim_kwargs["trim_end_ns"] = int(it["gpu_end_s"] * 1e9)
 
         # Parse --param KEY=VALUE pairs into validated, typed kwargs
         param_kwargs = {}
