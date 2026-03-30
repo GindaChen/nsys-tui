@@ -33,8 +33,10 @@ def _execute(conn, **kwargs):
         kernel_tbl = prof.schema.kernel_table
         if kernel_tbl:
             trim_clause = ""
+            params = [device]
             if trim is not None:
-                trim_clause = f" AND k.[end] >= {trim[0]} AND k.start <= {trim[1]} "
+                trim_clause = " AND k.[end] >= ? AND k.start <= ? "
+                params.extend([trim[0], trim[1]])
             same_stream = prof._duckdb_query(
                 f"""
                 SELECT k.streamId,
@@ -48,7 +50,7 @@ def _execute(conn, **kwargs):
                 GROUP BY k.streamId
                 HAVING nccl_count > 0 AND compute_count > 0
                 """,
-                (device,),
+                params,
             )
             if same_stream:
                 result["same_stream_diagnosis"] = [str(r["streamId"]) for r in same_stream]

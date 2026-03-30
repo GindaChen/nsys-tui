@@ -5,12 +5,9 @@ comparison to the median iteration. Use after `iteration_timing` identifies
 a slow iteration.
 """
 
-import logging
 import statistics
 
 from ..base import Skill, SkillParam
-
-_log = logging.getLogger(__name__)
 
 
 def _execute(conn, **kwargs):

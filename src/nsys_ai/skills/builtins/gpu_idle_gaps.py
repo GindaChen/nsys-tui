@@ -195,8 +195,8 @@ WHERE prev_end IS NOT NULL AND (start - prev_end) > ?"""
         "gaps_1_5ms": agg.get("gaps_1_5ms") or 0,
         "gaps_5_50ms": agg.get("gaps_5_50ms") or 0,
         "gaps_gt50ms": agg.get("gaps_gt50ms") or 0,
-        "profile_start_ns": time_range[0] if time_range else 0,
-        "profile_end_ns": time_range[1] if time_range else 0,
+        "profile_start_ns": time_range[0] if time_range else None,
+        "profile_end_ns": time_range[1] if time_range else None,
         "gpu_id": device,
     }
 
@@ -314,6 +314,7 @@ def _to_findings(rows: list[dict]) -> list:
                 pct > 5
                 and profile_start_ns is not None
                 and profile_end_ns is not None
+                and profile_end_ns > profile_start_ns
             ):
                 findings.append(
                     Finding(

@@ -5,11 +5,7 @@ nanosecond start/end timestamps. Essential for building findings.json
 evidence overlays on the timeline viewer.
 """
 
-import logging
-
 from ..base import Skill, SkillParam
-
-_log = logging.getLogger(__name__)
 
 
 def _execute(conn, **kwargs):
