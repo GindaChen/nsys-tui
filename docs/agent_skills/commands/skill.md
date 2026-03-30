@@ -35,6 +35,8 @@ nsys-ai skill run top_kernels profile.sqlite --trim 1.5 3.0   # seconds
 - `--param KEY=VALUE` — pass a parameter (repeatable, shorthand: `-p`)
 - `--trim START_S END_S` — restrict analysis to time range (seconds, space-separated)
 - `--max-rows N` — limit JSON output to at most N data rows (for token budget control). When clipping occurs, the JSON array contains up to N data rows plus a final truncation metadata object: `{"_truncated": true, "_total_rows": <original>, "_shown_rows": <shown>}`.
+- `--iteration N` — auto-trim to the N-th training iteration (0-based). Cannot be combined with `--trim`. Requires NVTX markers (or falls back to heuristic kernel-gap detection).
+- `--marker TEXT` — NVTX marker for iteration boundary detection (default: `sample_0`). Used with `--iteration`.
 
 ### `nsys-ai skill [--skills-dir <dir>] add <path.md>`
 
@@ -78,6 +80,7 @@ Parameters marked **required** must be provided via `--param`.
 | Skill | Title | Description |
 |-------|-------|-------------|
 | `top_kernels` | Top GPU Kernels by Total Time | Lists the heaviest GPU kernels ranked by cumulative execution time. Use to identify hotspots. |
+| `kernel_instances` | Kernel Instance Details | Returns individual kernel instances with exact **ns timestamps** (`start_ns`, `end_ns`). Use to get precise time ranges for `findings.json` evidence overlay. |
 | `kernel_launch_overhead` | Kernel Launch Overhead | Measures the gap between CUDA Runtime API call and GPU kernel execution. High overhead = CPU-side bottleneck. |
 | `kernel_launch_pattern` | Kernel Launch Pattern Analysis | Per-stream dispatch rate, burst density, inter-launch gaps, and sync-stall detection. |
 | `stream_concurrency` | Stream Concurrency Analysis | Multi-stream GPU concurrency: active streams, kernel packing, compute/memory overlap. |
@@ -90,6 +93,14 @@ Parameters marked **required** must be provided via `--param`.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|:--------:|---------|-------------|
 | `limit` | int | | 15 | Max number of kernels to return |
+
+#### `kernel_instances` Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|:--------:|---------|-------------|
+| `device` | int | | 0 | GPU device ID |
+| `name` | str | | (all) | Kernel name substring filter (demangled) |
+| `limit` | int | | 10 | Max instances to return |
 
 #### `kernel_launch_overhead` Parameters
 
@@ -194,6 +205,7 @@ No required parameters. Supports `--trim`.
 | `nvtx_kernel_map` | NVTX → Kernel Mapping | Maps NVTX annotation ranges to the GPU kernels within them. Core of source-code attribution. |
 | `nvtx_layer_breakdown` | NVTX Region GPU Time Breakdown | Attributes GPU kernels to NVTX regions, ranked by GPU time. Shows compute/NCCL split, top kernels, outlier detection. Auto-detects layer depth. |
 | `iteration_timing` | Per-Iteration Timing Analysis | Detects repeating training iterations via NVTX markers. Reports per-iteration GPU timing and kernel counts. |
+| `iteration_detail` | Per-Iteration Kernel Breakdown | Drill into a specific iteration: top kernels, NCCL stats, compute time, vs-median comparison. Use after `iteration_timing` identifies a slow iteration. |
 
 #### `nvtx_kernel_map` Parameters
 
@@ -215,6 +227,14 @@ No required parameters. Supports `--trim`.
 |-----------|------|:--------:|---------|-------------|
 | `device` | int | | 0 | GPU device ID |
 | `marker` | str | | `sample_0` | NVTX text pattern for iteration boundary |
+
+#### `iteration_detail` Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|:--------:|---------|-------------|
+| `iteration` | int | ✅ | 0 | Iteration index (0-based) |
+| `device` | int | | 0 | GPU device ID |
+| `marker` | str | | `sample_0` | NVTX marker for iteration boundary detection |
 
 ---
 
@@ -288,14 +308,25 @@ No required parameters. Supports `--trim`.
 
 | Category | Count | What it covers |
 |----------|:-----:|----------------|
-| `kernels` | 7 | GPU kernel timing, launch overhead, MFU, FLOPs |
+| `kernels` | 8 | GPU kernel timing, instance details, launch overhead, MFU, FLOPs |
 | `memory` | 3 | H2D/D2H transfers, bandwidth, distribution |
 | `communication` | 4 | NCCL breakdown, anomalies, overlap, overlap matrix |
-| `nvtx` | 3 | NVTX→kernel mapping, layer breakdown, iterations |
+| `nvtx` | 4 | NVTX→kernel mapping, layer breakdown, iterations, iteration detail |
 | `system` | 2 | CPU→GPU pipeline, thread utilization |
 | `analysis` | 2 | Root cause patterns, speedup estimates |
 | `utility` | 2 | Schema inspection, profile health manifest |
-| **Total** | **23** | |
+| **Total** | **25** | |
 
 > **Note**: `memory_transfers.py` registers 2 skills (`memory_transfers` + `h2d_distribution`).
-> There are exactly 23 unique Python builtin skills.
+> There are exactly 25 unique Python builtin skills.
+
+---
+
+## Related Commands
+
+| Command | Purpose |
+|---------|--------|
+| `nsys-ai evidence build <profile>` | Run heuristic analyzers → generate timeline-ready `findings.json` with ns timestamps |
+| `nsys-ai timeline-web <profile> --findings <file>` | Visualize evidence findings on the timeline |
+
+See [evidence-build.md](evidence-build.md) for details.

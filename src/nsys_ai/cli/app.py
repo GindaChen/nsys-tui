@@ -99,6 +99,7 @@ def main():
         "timeline",
         "skill",
         "agent",
+        "evidence",
     }
     if len(sys.argv) > 1 and sys.argv[1] in legacy_commands:
         parser = _build_legacy_parser()

@@ -63,3 +63,25 @@ Step 4  Report:
           Thermal → use nvidia-smi to check GPU clocks; reduce power limit
           NCCL retry → check network stability; NCCL_DEBUG=INFO logs
 ```
+
+---
+
+## CLI-Based Drill-Down
+
+After Step 1, use the CLI skills for faster iteration:
+
+```bash
+# Step 1: Get per-iteration timing
+nsys-ai skill run iteration_timing profile.sqlite --format json
+
+# Step 3: Drill into a slow iteration (e.g. iteration 3)
+nsys-ai skill run iteration_detail profile.sqlite --format json -p iteration=3
+
+# Alternative: Use --iteration to auto-trim any skill to that iteration
+nsys-ai skill run top_kernels profile.sqlite --format json --iteration 3
+nsys-ai skill run gpu_idle_gaps profile.sqlite --format json --iteration 3
+nsys-ai skill run kernel_instances profile.sqlite --format json --iteration 3
+
+# Get exact ns timestamps for evidence overlay
+nsys-ai skill run kernel_instances profile.sqlite --format json --iteration 3 -p name=flash
+```

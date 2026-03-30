@@ -128,6 +128,7 @@ class Skill:
     format_fn: Callable | None = None
     tags: list[str] = field(default_factory=list)
     execute_fn: Callable | None = None
+    to_findings_fn: Callable | None = None
 
     def execute(self, conn: sqlite3.Connection, **kwargs) -> list[dict]:
         """Run the skill against a connection.

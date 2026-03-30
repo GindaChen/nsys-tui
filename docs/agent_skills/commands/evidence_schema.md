@@ -93,23 +93,43 @@ Findings should encode **conclusions**, not raw data. The agent must reason abou
 
 ## How to Get Nanosecond Timestamps
 
-Run skills with `--format json` to get timing data with nanosecond precision:
+### Option A: `kernel_instances` skill (recommended for targeted findings)
+
+```bash
+# Get specific kernel instances with exact ns timestamps
+nsys-ai skill run kernel_instances profile.sqlite --format json -p name=flash_bwd -p limit=3
+# Returns: [{"kernel_name": "...", "start_ns": 89886440111, "end_ns": 89982440111, "duration_ms": 96.0, ...}]
+
+# All top instances (no name filter)
+nsys-ai skill run kernel_instances profile.sqlite --format json -p limit=5
+```
+
+### Option B: `evidence build` (automatic evidence generation)
+
+```bash
+# Run all 7 heuristic analyzers → findings JSON with ns timestamps
+nsys-ai evidence build profile.sqlite --format json -o /tmp/findings.json
+
+# Run specific analyzers only
+nsys-ai evidence build profile.sqlite --analyzers idle_gaps,nccl_stalls --format json
+```
+
+See [evidence-build.md](evidence-build.md) for full analyzer list and options.
+
+### Option C: Other skills with ns data
 
 ```bash
 # GPU idle gaps → use start_ns / end_ns directly for finding start/end
 nsys-ai skill run gpu_idle_gaps profile.sqlite --format json
 # Returns: [{"start_ns": 89000000000, "end_ns": 110000000000, "gap_ns": 21065000000, ...}]
 
-# Top kernels → use start / end
-nsys-ai skill run top_kernels profile.sqlite --format json
-# Returns: [{"name": "...", "start": 117142000000, "end": 117154000000, "dur_ns": 12390000, ...}]
-
-# NCCL breakdown → use start / end for individual instances
+# NCCL breakdown → aggregate totals per collective type (no instance-level ns)
 nsys-ai skill run nccl_breakdown profile.sqlite --format json
 # Returns: [{"name": "ncclDevKernel_SendRecv", "total_ns": 6496000000, ...}]
+# → Use kernel_instances -p name=nccl for instance-level timestamps
 ```
 
-> **Tip**: If a skill returns aggregated data (e.g. `nccl_breakdown` returns totals per collective type), use `query_profile_db` or `skill run top_kernels` to find specific kernel instances with exact timestamps.
+> **Tip**: `kernel_instances` is the primary way to get instance-level ns timestamps for any kernel type. Use it to bridge the gap between aggregate skill output and findings.json evidence.
 
 ---
 

@@ -53,7 +53,7 @@ _How to detect parallelism_: Look at NCCL op types. Majority AllReduce → DP/FS
   - Memcpy → Abnormal. Investigate why data is moving.
   - Sync/Wait → Abnormal. Points to synchronization/idle issues.
 - Analyze **launch patterns**: Are they executed in bursts or evenly spaced? Is there serialization (kernels executing sequentially on the same stream without concurrency)?
-**Suggested Approach**: Identify the top consumers first (e.g., via the `top_kernels` skill). See [commands/skill.md](../commands/skill.md) for deeper analysis tools to investigate launch patterns or stream concurrency.
+**Suggested Approach**: Identify the top consumers first (e.g., via the `top_kernels` skill). Use `kernel_instances -p name=<kernel>` to get exact ns timestamps for evidence overlay. See [commands/skill.md](../commands/skill.md) for deeper analysis tools to investigate launch patterns or stream concurrency.
 
 ---
 
@@ -98,4 +98,14 @@ _How to detect parallelism_: Look at NCCL op types. Majority AllReduce → DP/FS
 
 **Suggested Approach**: Match findings against known patterns (e.g., via the `root_cause_matcher` skill). Consult [commands/skill.md](../commands/skill.md) for estimation tools like `speedup_estimator` to quantify potential fixes.
 
-> **Output Requirement**: After eliminating hypotheses via Stages 1-6, encode your causal chain into `/tmp/findings.json` to generate visual evidence on the `timeline-web` UI.
+> **Output Requirement**: After eliminating hypotheses via Stages 1-6, generate visual evidence:
+> ```bash
+> # Option A: Automatic — run heuristic analyzers
+> nsys-ai evidence build profile.sqlite --format json -o /tmp/findings.json
+>
+> # Option B: Manual — encode your conclusions as findings.json
+> # (use kernel_instances skill to get exact ns timestamps)
+>
+> # Then visualize:
+> nsys-ai timeline-web profile.sqlite --findings /tmp/findings.json
+> ```

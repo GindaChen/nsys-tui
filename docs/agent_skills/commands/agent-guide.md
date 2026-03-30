@@ -21,7 +21,10 @@ The output is a structured System Prompt payload containing:
 4. **6-Stage Top-Down Triage Workflow** — the recommended analysis sequence:
    - **Step 0 (Quick Start)**: `profile_health_manifest` — one-shot triage in a single call
    - Orient → Temporal Breakdown → Kernel Deep-Dive → NVTX Mapping → Cross-GPU → Root Cause
-5. **CLI Execution syntax** — exact command templates including `--max-rows N` for token budget control
+5. **CLI Execution syntax** — exact command templates including:
+   - `--max-rows N` for token budget control
+   - `--iteration N` for auto-trimming to a specific training iteration
+   - `nsys-ai evidence build` for generating timeline-ready findings
 6. **Full Skill Catalog** — dynamically generated from the Python skill registry (always up-to-date with the current builtin skills)
 
 ## When to use

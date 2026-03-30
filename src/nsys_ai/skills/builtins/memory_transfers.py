@@ -83,6 +83,7 @@ def _classify_h2d_pattern(rows: list[dict]) -> dict:
                     f"Check timeline at those timestamps for unexpected data movement."
                 ),
                 "spike_seconds": [r["second"] for r in spikes],
+                "spikes": [{"second": r["second"], "total_mb": r["total_mb"], "window_start": r.get("window_start"), "window_end": r.get("window_end")} for r in spikes],
             }
 
     # Spread-out: transfers happen across many seconds
@@ -149,7 +150,9 @@ SELECT
     CAST((k.start - b.min_start) / 1000000000.0 AS INT) AS second,
     COUNT(*) AS ops,
     SUM(k.bytes) / 1e6 AS total_mb,
-    COALESCE(SUM(k.bytes) / NULLIF(SUM(k.[end] - k.start), 0), 0) * 1e9 / 1e9 AS avg_gbps
+    COALESCE(SUM(k.bytes) / NULLIF(SUM(k.[end] - k.start), 0), 0) * 1e9 / 1e9 AS avg_gbps,
+    MIN(k.start) AS window_start,
+    MAX(k.[end]) AS window_end
 FROM {memcpy_table} k CROSS JOIN baseline b
 WHERE k.copyKind = 1 {trim_clause}
 GROUP BY 1
@@ -158,6 +161,34 @@ ORDER BY 1""",
     tags=["memory", "transfer", "H2D", "distribution", "time", "leak"],
 )
 
+def _to_findings_dist(rows: list[dict]) -> list:
+    from nsys_ai.annotation import Finding
+    findings = []
+    
+    pattern = next((r for r in rows if r.get("_pattern")), None)
+    if not pattern:
+        return findings
+
+    if pattern.get("type") == "spike":
+        for spike in pattern.get("spikes", []):
+            start = spike.get("window_start")
+            end = spike.get("window_end")
+            if start and end:
+                findings.append(
+                    Finding(
+                        type="region",
+                        label=f"H2D Spike ({spike['total_mb']:.1f}MB)",
+                        start_ns=start,
+                        end_ns=end,
+                        gpu_id=0,  # device id omitted from summary row right now, finding API ignores it for regions anyway
+                        severity="warning",
+                        note=f"Spike at second {spike['second']}: {spike['total_mb']:.1f}MB transferred",
+                    )
+                )
+    return findings
+
+
+H2D_DIST_SKILL.to_findings_fn = _to_findings_dist
 
 # Replace the direct SQL with a safe execute_fn for the module
 def _execute_h2d_dist(conn, **kwargs):

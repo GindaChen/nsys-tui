@@ -17,6 +17,7 @@ from .handlers import (
     _cmd_chat,
     _cmd_diff,
     _cmd_diff_web,
+    _cmd_evidence,
     _cmd_export,
     _cmd_export_csv,
     _cmd_export_json,
@@ -334,6 +335,22 @@ def _register_legacy_commands(sub):
             "the array may contain N+1 items)."
         ),
     )
+    sp_run.add_argument(
+        "--iteration",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Auto-trim to the N-th training iteration (0-based). "
+            "Cannot be used with --trim. Requires NVTX markers."
+        ),
+    )
+    sp_run.add_argument(
+        "--marker",
+        type=str,
+        default="sample_0",
+        help="NVTX marker for iteration boundary detection (default: sample_0).",
+    )
     sp_add = skill_sub.add_parser("add", help="Add a custom skill from .md file")
     sp_add.add_argument("skill_file", help="Path to skill .md file")
     sp_rm = skill_sub.add_parser("remove", help="Remove a custom skill")
@@ -368,6 +385,39 @@ def _register_legacy_commands(sub):
     sp_ask.add_argument("profile", help="Path to .sqlite file")
     sp_ask.add_argument("question", help="Natural language question")
     p.set_defaults(handler=_cmd_agent)
+
+    # ── evidence ──────────────────────────────────────────────────
+    p = sub.add_parser("evidence", help="Build evidence findings for timeline overlay")
+    evidence_sub = p.add_subparsers(dest="evidence_action")
+    sp_build = evidence_sub.add_parser(
+        "build", help="Run heuristic analyzers → findings JSON"
+    )
+    sp_build.add_argument("profile", help="Path to .sqlite profile")
+    sp_build.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="json",
+        help="Output format (default: json)",
+    )
+    sp_build.add_argument(
+        "--analyzers",
+        default=None,
+        help="Comma-separated analyzer names: slow_iterations,idle_gaps,"
+        "nccl_stalls,kernel_hotspots,overlap_ratio,memory_anomalies,h2d_spikes",
+    )
+    sp_build.add_argument(
+        "--trim",
+        nargs=2,
+        type=float,
+        metavar=("START_S", "END_S"),
+        default=None,
+        help="Time window in seconds",
+    )
+    sp_build.add_argument("--gpu", type=int, default=0, help="GPU device ID (default: 0)")
+    sp_build.add_argument(
+        "-o", "--output", default=None, help="Write findings JSON to file"
+    )
+    p.set_defaults(handler=_cmd_evidence)
 
     sub.add_parser("help", help="Show getting-started guide and available commands")
 

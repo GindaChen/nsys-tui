@@ -57,12 +57,12 @@ You have two ways to interact with the profile:
 | External agent onboarding | `nsys-ai agent-guide` |
 
 **Analysis Skills**: Use `nsys-ai skill run <name> profile.sqlite` to run specific
-analysis modules. See [`commands/skill.md`](commands/skill.md) for the full catalog of 23 builtin skills.
+analysis modules. See [`commands/skill.md`](commands/skill.md) for the full catalog of 25 builtin skills.
 
-> **After analysis**: Encode your conclusions as `findings.json` and open
-> `nsys-ai timeline-web profile.sqlite --findings findings.json` so the user
-> can visually verify your claims. See [`commands/evidence_schema.md`](commands/evidence_schema.md)
-> for the JSON schema and end-to-end workflow.
+> **After analysis**: Generate evidence with `nsys-ai evidence build profile.sqlite --format json`
+> or manually encode conclusions as `findings.json`, then open
+> `nsys-ai timeline-web profile.sqlite --findings findings.json` for visual verification.
+> See [`commands/evidence-build.md`](commands/evidence-build.md) and [`commands/evidence_schema.md`](commands/evidence_schema.md).
 
 > **Performance Note**: Running stateless CLI commands (`nsys-ai skill run`) on multi-gigabyte `.sqlite` profiles can take 30–60+ seconds per invocation due to DuckDB/SQLite cold starts and Parquet conversion. For heavy analysis workflows, batch your queries or expect high latency.
 
@@ -123,7 +123,8 @@ docs/agent_skills/
 │   ├── validate.md    /nsys:validate
 │   ├── skilldoc.md    /nsys:skilldoc (documentation audit)
 │   ├── evidence_schema.md  Finding JSON schema
-│   ├── skill.md       nsys-ai skill CLI + builtin catalog (21 Python skills)
+│   ├── evidence-build.md   nsys-ai evidence build CLI
+│   ├── skill.md       nsys-ai skill CLI + builtin catalog (25 Python skills)
 │   └── agent-guide.md nsys-ai agent-guide (external agent onboarding)
 └── skills/            ← LLM workflow guides (load on demand)
     ├── SKILL_TEMPLATE.md

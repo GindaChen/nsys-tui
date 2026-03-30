@@ -21,7 +21,47 @@ def _execute(conn, **kwargs):
     trim_end = kwargs.get("trim_end_ns")
     if trim_start is not None and trim_end is not None:
         trim = (int(trim_start), int(trim_end))
-    return detect_iterations(prof, device, trim=trim, marker=marker)
+    iters = detect_iterations(prof, device, trim=trim, marker=marker)
+    for it in iters:
+        it["device_id"] = device
+    return iters
+
+
+def _to_findings(rows: list[dict]) -> list:
+    import statistics
+    from nsys_ai.annotation import Finding
+    
+    findings = []
+    if len(rows) < 3:
+        return findings
+        
+    durs = [it["duration_ms"] for it in rows if "duration_ms" in it]
+    if not durs:
+        return findings
+        
+    med = statistics.median(durs)
+    if med <= 0:
+        return findings
+        
+    for it in rows:
+        if it.get("duration_ms", 0) > 1.5 * med:
+            pct = 100 * it["duration_ms"] / med
+            findings.append(
+                Finding(
+                    type="region",
+                    label=f"Slow Iteration {it.get('iteration', '?')}",
+                    start_ns=int(it.get("gpu_start_s", 0) * 1e9),
+                    end_ns=int(it.get("gpu_end_s", 0) * 1e9),
+                    gpu_id=it.get("device_id", 0),  # Assuming device_id is available or defaults to 0
+                    severity="warning",
+                    note=(
+                        f"{it['duration_ms']:.1f}ms "
+                        f"({pct:.0f}% of median {med:.1f}ms), "
+                        f"{it.get('kernel_count', 0)} kernels"
+                    ),
+                )
+            )
+    return findings
 
 
 def _format(rows):
@@ -59,6 +99,7 @@ SKILL = Skill(
     category="nvtx",
     execute_fn=_execute,
     format_fn=_format,
+    to_findings_fn=_to_findings,
     params=[
         SkillParam("device", "GPU device ID", "int", False, 0),
         SkillParam("marker", "NVTX text pattern for iteration boundary", "str", False, "sample_0"),
