@@ -6,6 +6,7 @@ a slow iteration.
 """
 
 import logging
+import statistics
 
 from ..base import Skill, SkillParam
 
@@ -60,8 +61,7 @@ def _execute(conn, **kwargs):
 
     # 3. Compute vs_median
     durs = [it["duration_ms"] for it in iters]
-    sorted_durs = sorted(durs)
-    median = sorted_durs[len(sorted_durs) // 2]
+    median = statistics.median(durs)
     vs_median = round((target["duration_ms"] - median) / median * 100, 1) if median > 0 else 0
 
     return [{
@@ -116,7 +116,7 @@ SKILL = Skill(
     execute_fn=_execute,
     format_fn=_format,
     params=[
-        SkillParam("iteration", "Iteration index (0-based)", "int", True, 0),
+        SkillParam("iteration", "Iteration index (0-based)", "int", True, None),
         SkillParam("device", "GPU device ID", "int", False, 0),
         SkillParam("marker", "NVTX marker for iteration boundary detection", "str", False, "sample_0"),
     ],

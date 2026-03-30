@@ -71,9 +71,7 @@ GROUP BY r.copyKind
 ORDER BY total_mb DESC"""
 
     try:
-        cur = conn.execute(sqlite_to_duckdb(agg_sql), [device] + trim_params)
-        cols = [d[0] for d in cur.description]
-        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        rows = prof._duckdb_query(agg_sql, [device] + trim_params)
     except (sqlite3.Error, duckdb.Error):
         return []
 
@@ -91,9 +89,7 @@ LIMIT {limit}"""
 
     anomalies = []
     try:
-        cur = conn.execute(sqlite_to_duckdb(anomaly_sql), [device] + trim_params)
-        a_cols = [d[0] for d in cur.description]
-        anomalies = [dict(zip(a_cols, r)) for r in cur.fetchall()]
+        anomalies = prof._duckdb_query(anomaly_sql, [device] + (trim_params * 2 if trim_params else []))
     except (sqlite3.Error, duckdb.Error):
         pass
 

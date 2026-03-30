@@ -573,16 +573,22 @@ def _cmd_evidence(args, _profile):
         device = getattr(args, "gpu", 0) or 0
         builder = EvidenceBuilder(prof, device=device, trim=trim)
 
-        analyzers = getattr(args, "analyzers", None)
-        if analyzers:
-            report = builder.build(only=analyzers.split(","))
+        analyzers_raw = getattr(args, "analyzers", None)
+        if analyzers_raw:
+            only_analyzers = [name for name in (part.strip() for part in analyzers_raw.split(",")) if name]
+            report = builder.build(only=only_analyzers) if only_analyzers else builder.build()
         else:
             report = builder.build()
 
         findings = [f.to_dict() for f in report.findings]
         fmt = getattr(args, "format", "json")
         if fmt == "json":
-            print(json.dumps(findings, indent=2))
+            out_report = {
+                "title": getattr(report, "title", "Evidence Report"),
+                "profile_path": getattr(report, "profile_path", args.profile),
+                "findings": findings
+            }
+            print(json.dumps(out_report, indent=2))
         else:
             sev_icons = {"critical": "🔴", "warning": "🟡", "info": "🔵"}
             print(f"── Evidence Findings ({len(findings)}) ──")
@@ -598,7 +604,7 @@ def _cmd_evidence(args, _profile):
             from nsys_ai.annotation import save_findings
 
             save_findings(report, out)
-            print(f"Saved {len(findings)} finding(s) → {out}", flush=True)
+            print(f"Saved {len(findings)} finding(s) → {out}", flush=True, file=sys.stderr)
 
 
 def _apply_max_rows_truncation(rows: list, max_rows: int) -> list:
@@ -717,10 +723,14 @@ def _cmd_skill(args, _profile):
             from nsys_ai.overlap import detect_iterations
             from nsys_ai.profile import Profile
 
-            with Profile(args.profile) as _prof:
-                marker = getattr(args, "marker", "sample_0")
-                device = 0
-                iters = detect_iterations(_prof, device, marker=marker)
+            prof_iter = Profile._from_conn(conn)
+            marker = getattr(args, "marker", "sample_0")
+            
+            # Extract device from raw params (if provided via -p device=<n>)
+            device_val = next((p.split("=")[1] for p in getattr(args, "param", []) if p.startswith("device=")), "0")
+            device = int(device_val) if device_val.isdigit() else 0
+            
+            iters = detect_iterations(prof_iter, device, marker=marker)
             if not iters:
                 print("Error: no iterations detected (NVTX marker not found)", file=sys.stderr)
                 sys.exit(1)

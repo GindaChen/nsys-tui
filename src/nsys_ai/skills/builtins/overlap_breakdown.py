@@ -51,7 +51,7 @@ def _execute(conn, **kwargs):
             if same_stream:
                 result["same_stream_diagnosis"] = [str(r["streamId"]) for r in same_stream]
     except Exception:
-        pass
+        _log.debug("Failed to enrich stream compute/nccl overlap", exc_info=True)
 
     result["device_id"] = device
     return [result]

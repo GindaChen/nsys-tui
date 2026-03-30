@@ -61,21 +61,25 @@ nsys-ai evidence build profile.sqlite --trim 5.0 15.0 --format json
 
 ## Output Format
 
-Each finding is a JSON object following the [Evidence Schema](evidence_schema.md):
+The JSON output is an EvidenceReport object following the [Evidence Schema](evidence_schema.md):
 
 ```json
-[
-  {
-    "type": "region",
-    "label": "GPU Idle Gap (12.34ms)",
-    "start_ns": 89000000000,
-    "end_ns": 89012340000,
-    "gpu_id": 0,
-    "stream": "7",
-    "severity": "warning",
-    "note": "Stream 7: 12.34ms idle — CPU: cudaLaunchKernel (11.2ms)"
-  }
-]
+{
+  "title": "Idle gaps and NCCL stalls",
+  "profile_path": "profile.sqlite",
+  "findings": [
+    {
+      "type": "region",
+      "label": "GPU Idle Gap (12.34ms)",
+      "start_ns": 89000000000,
+      "end_ns": 89012340000,
+      "gpu_id": 0,
+      "stream": "7",
+      "severity": "warning",
+      "note": "Stream 7: 12.34ms idle — CPU: cudaLaunchKernel (11.2ms)"
+    }
+  ]
+}
 ```
 
 ### Finding Types
