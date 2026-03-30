@@ -559,6 +559,9 @@ def _apply_max_rows_truncation(rows: list, max_rows: int) -> list:
     """Truncate JSON rows array if it exceeds max_rows. Preserves original total count."""
     if max_rows < 0:
         raise ValueError("--max-rows must be a non-negative integer")
+    # Preserve error payloads even if max_rows is 0.
+    if len(rows) == 1 and isinstance(rows[0], dict) and "error" in rows[0]:
+        return rows
     if len(rows) > max_rows:
         total = len(rows)
         # Convert to list to ensure we don't mutate an original view/tuple

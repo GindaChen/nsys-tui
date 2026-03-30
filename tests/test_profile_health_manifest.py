@@ -118,3 +118,18 @@ class TestMaxRowsTruncation:
         rows = [{"id": i} for i in range(3)]
         with pytest.raises(ValueError, match="non-negative integer"):
             _apply_max_rows_truncation(rows, -1)
+
+    def test_error_payload_not_truncated_when_max_rows_zero(self):
+        """Error payloads (e.g., [{'error': ...}]) should not be dropped by max-rows."""
+        from nsys_ai.cli.handlers import _apply_max_rows_truncation
+        
+        rows = [{"error": "Something went wrong"}]
+        truncated = _apply_max_rows_truncation(rows, 0)
+        
+        # The single error row should be preserved and not replaced by a truncation marker.
+        assert isinstance(truncated, list)
+        assert len(truncated) == 1
+        assert "error" in truncated[0]
+        assert truncated[0]["error"] == "Something went wrong"
+        # Error payloads should not be marked as truncated.
+        assert not truncated[0].get("_truncated")

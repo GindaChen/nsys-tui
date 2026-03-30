@@ -4,7 +4,7 @@ Returns a compact JSON summary (~500 bytes) that captures the essential
 profile characteristics in a single tool call, eliminating the need for
 5-8 sequential skill invocations during agent exploration.
 
-Internally orchestrates: top_kernels, overlap_breakdown, nccl_breakdown,
+Internally orchestrates: overlap_breakdown, nccl_breakdown,
 gpu_idle_gaps, and root_cause_matcher.
 """
 
