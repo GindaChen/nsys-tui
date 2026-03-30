@@ -603,7 +603,19 @@ def _cmd_evidence(args, _profile):
         if out:
             from nsys_ai.annotation import save_findings
 
-            save_findings(report, out)
+            out_dir = os.path.dirname(out)
+            if out_dir and not os.path.exists(out_dir):
+                try:
+                    os.makedirs(out_dir, exist_ok=True)
+                except OSError as e:
+                    print(f"Error: Failed to create output directory '{out_dir}': {e}", file=sys.stderr, flush=True)
+                    sys.exit(1)
+
+            try:
+                save_findings(report, out)
+            except OSError as e:
+                print(f"Error: Failed to write findings to '{out}': {e}", file=sys.stderr, flush=True)
+                sys.exit(1)
             print(f"Saved {len(findings)} finding(s) → {out}", flush=True, file=sys.stderr)
 
 

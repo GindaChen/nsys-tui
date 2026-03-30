@@ -342,14 +342,18 @@ def _register_legacy_commands(sub):
         metavar="N",
         help=(
             "Auto-trim to the N-th training iteration (0-based). "
-            "Cannot be used with --trim. Requires NVTX markers."
+            "Cannot be used with --trim. Uses NVTX markers when available and "
+            "falls back to a kernel-gap heuristic when markers are missing."
         ),
     )
     sp_run.add_argument(
         "--marker",
         type=str,
         default="sample_0",
-        help="NVTX marker for iteration boundary detection (default: sample_0).",
+        help=(
+            "NVTX marker for iteration boundary detection when using --iteration "
+            "(default: sample_0)."
+        ),
     )
     sp_add = skill_sub.add_parser("add", help="Add a custom skill from .md file")
     sp_add.add_argument("skill_file", help="Path to skill .md file")
