@@ -90,43 +90,31 @@ class TestManifestDuckDB:
 
 
 # ── Token budget protection (--max-rows) ─────────────────────────
-# TODO: These tests simulate the truncation logic from handlers.py inline
-# rather than exercising the actual CLI/handler code path.  Consider adding
-# integration-style tests that invoke the handler (or factoring truncation
-# into a helper function) so that changes to handlers.py are caught.
 
 
 class TestMaxRowsTruncation:
-    def test_truncation_applied(self, minimal_nsys_conn):
-        """When a skill returns many rows, --max-rows should truncate."""
-        skill = get_skill("top_kernels")
-        assert skill is not None
-        rows = skill.execute(minimal_nsys_conn, device=0, limit=50)
-
-        # Simulate truncation logic from handlers.py
+    def test_truncation_applied(self):
+        from nsys_ai.cli.handlers import _apply_max_rows_truncation
+        
+        rows = [{"id": i} for i in range(10)]
         max_rows = 3
-        assert len(rows) > max_rows, "Fixture must return > max_rows for test to be valid"
-        if len(rows) > max_rows:
-            total = len(rows)
-            truncated = rows[:max_rows]
-            truncated.append({
-                "_truncated": True,
-                "_total_rows": total,
-                "_shown_rows": max_rows,
-            })
-            assert len(truncated) == max_rows + 1
-            assert truncated[-1]["_truncated"] is True
-            assert truncated[-1]["_total_rows"] == total
+        truncated = _apply_max_rows_truncation(rows, max_rows)
+        assert len(truncated) == max_rows + 1
+        assert truncated[-1]["_truncated"] is True
+        assert truncated[-1]["_total_rows"] == 10
+        assert truncated[-1]["_shown_rows"] == 3
 
-    def test_no_truncation_when_under_limit(self, minimal_nsys_conn):
-        """When rows < max_rows, no truncation metadata should appear."""
-        skill = get_skill("top_kernels")
-        assert skill is not None
-        rows = skill.execute(minimal_nsys_conn, device=0, limit=5)
+    def test_no_truncation_when_under_limit(self):
+        from nsys_ai.cli.handlers import _apply_max_rows_truncation
+        
+        rows = [{"id": i} for i in range(3)]
+        truncated = _apply_max_rows_truncation(rows, 100)
+        assert len(truncated) == 3
+        assert not any(r.get("_truncated") for r in truncated)
 
-        max_rows = 100
-        if len(rows) > max_rows:
-            rows = rows[:max_rows]
-            rows.append({"_truncated": True})
-        # Should NOT have truncation marker
-        assert not any(r.get("_truncated") for r in rows)
+    def test_negative_max_rows_raises(self):
+        from nsys_ai.cli.handlers import _apply_max_rows_truncation
+        
+        rows = [{"id": i} for i in range(3)]
+        with pytest.raises(ValueError, match="non-negative integer"):
+            _apply_max_rows_truncation(rows, -1)

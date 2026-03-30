@@ -555,6 +555,23 @@ def _cmd_chat(args, _profile):
     run_chat_tui(args.profile)
 
 
+def _apply_max_rows_truncation(rows: list, max_rows: int) -> list:
+    """Truncate JSON rows array if it exceeds max_rows. Preserves original total count."""
+    if max_rows < 0:
+        raise ValueError("--max-rows must be a non-negative integer")
+    if len(rows) > max_rows:
+        total = len(rows)
+        # Convert to list to ensure we don't mutate an original view/tuple
+        truncated = list(rows[:max_rows])
+        truncated.append({
+            "_truncated": True,
+            "_total_rows": total,
+            "_shown_rows": max_rows,
+        })
+        return truncated
+    return rows
+
+
 def _cmd_skill(args, _profile):
     import json as _json
 
@@ -706,14 +723,12 @@ def _cmd_skill(args, _profile):
 
                 # Token budget protection: truncate rows if --max-rows set
                 max_rows = getattr(args, "max_rows", None)
-                if max_rows is not None:
-                    if max_rows < 0:
-                        print("Error: --max-rows must be a non-negative integer", file=sys.stderr)
+                if max_rows is not None and isinstance(rows, list):
+                    try:
+                        rows = _apply_max_rows_truncation(rows, max_rows)
+                    except ValueError as exc:
+                        print(f"Error: {exc}", file=sys.stderr)
                         sys.exit(1)
-                if max_rows is not None and isinstance(rows, list) and len(rows) > max_rows:
-                    total = len(rows)
-                    rows = rows[:max_rows]
-                    rows.append({"_truncated": True, "_total_rows": total, "_shown_rows": max_rows})
 
                 print(_json.dumps(rows, indent=2))
             else:

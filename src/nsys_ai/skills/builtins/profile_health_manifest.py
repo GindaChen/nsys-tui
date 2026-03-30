@@ -55,7 +55,7 @@ def _execute(conn, **kwargs):
             device_info = gpu_info[device]
         if device_info is not None:
             gpu_name = getattr(device_info, "name", "unknown")
-            
+
     # Fallback if device info is missing/empty
     if not gpu_name or gpu_name == "unknown":
         from ...profile import get_first_gpu_name
@@ -65,9 +65,8 @@ def _execute(conn, **kwargs):
     # so the reported span matches the analysis window used by sub-skills.
     effective_start_ns = start_ns
     effective_end_ns = end_ns
-    if trim_kwargs.get("trim_start_ns") is not None:
+    if trim_kwargs.get("trim_start_ns") is not None and trim_kwargs.get("trim_end_ns") is not None:
         effective_start_ns = max(effective_start_ns, trim_kwargs["trim_start_ns"])
-    if trim_kwargs.get("trim_end_ns") is not None:
         effective_end_ns = min(effective_end_ns, trim_kwargs["trim_end_ns"])
     profile_span_ns = (
         effective_end_ns - effective_start_ns
