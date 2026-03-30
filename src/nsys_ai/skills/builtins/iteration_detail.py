@@ -35,9 +35,14 @@ def _execute(conn, **kwargs):
 
     target = iters[iteration]
 
-    # gpu_start_s / gpu_end_s are in SECONDS → convert to ns
-    start_ns = int(target["gpu_start_s"] * 1e9)
-    end_ns = int(target["gpu_end_s"] * 1e9)
+    # Prefer native ns fields if present; otherwise, derive from seconds.
+    if "gpu_start_ns" in target and "gpu_end_ns" in target:
+        start_ns = int(target["gpu_start_ns"])
+        end_ns = int(target["gpu_end_ns"])
+    else:
+        # gpu_start_s / gpu_end_s are in SECONDS → convert to ns (may be rounded)
+        start_ns = int(target["gpu_start_s"] * 1e9)
+        end_ns = int(target["gpu_end_s"] * 1e9)
 
     # 2. Run aggregate_kernels within this iter's time range
     kernels = prof.aggregate_kernels(device=device, trim=(start_ns, end_ns), limit=10)

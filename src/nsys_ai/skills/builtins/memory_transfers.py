@@ -1,6 +1,6 @@
 """Memory transfer summary — H2D, D2H, D2D, P2P breakdown."""
 
-from ..base import Skill
+from ..base import Skill, SkillParam
 
 _COPY_KINDS = {1: "H2D", 2: "D2H", 8: "D2D", 10: "P2P"}
 
@@ -142,11 +142,14 @@ H2D_DIST_SKILL = Skill(
         "and continuous data feeding in the training/inference loop."
     ),
     category="memory",
+    params=[
+        SkillParam("device", "GPU device ID", "int", False, 0)
+    ],
     sql="""\
 WITH baseline AS (
     SELECT MIN(k.start) AS min_start
     FROM {memcpy_table} k
-    WHERE k.copyKind = 1 {trim_clause}
+    WHERE k.copyKind = 1 AND k.deviceId = {device} {trim_clause}
 )
 SELECT
     CAST((k.start - b.min_start) / 1000000000.0 AS INT) AS second,
@@ -156,7 +159,7 @@ SELECT
     MIN(k.start) AS window_start,
     MAX(k.[end]) AS window_end
 FROM {memcpy_table} k CROSS JOIN baseline b
-WHERE k.copyKind = 1 {trim_clause}
+WHERE k.copyKind = 1 AND k.deviceId = {device} {trim_clause}
 GROUP BY 1
 ORDER BY 1""",
     format_fn=_format_dist,
@@ -175,7 +178,7 @@ def _to_findings_dist(rows: list[dict]) -> list:
         for spike in pattern.get("spikes", []):
             start = spike.get("window_start")
             end = spike.get("window_end")
-            if start and end:
+            if start is not None and end is not None and end > start:
                 findings.append(
                     Finding(
                         type="region",
@@ -210,6 +213,7 @@ def _execute_h2d_dist(conn, **kwargs):
         title=H2D_DIST_SKILL.title,
         description=H2D_DIST_SKILL.description,
         category=H2D_DIST_SKILL.category,
+        params=H2D_DIST_SKILL.params,
         sql=H2D_DIST_SKILL.sql,
         format_fn=H2D_DIST_SKILL.format_fn,
         tags=getattr(H2D_DIST_SKILL, "tags", None),
