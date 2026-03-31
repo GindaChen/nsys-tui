@@ -38,12 +38,15 @@ def test_subcommands():
         "diff-web",
         "export",
         "agent-guide",
+        "info",
+        "skill",
+        "evidence",
     ]:
         assert cmd in result.stdout, f"Missing subcommand: {cmd}"
 
     # Legacy command names should be hidden from top-level help.
     usage_line = result.stdout.splitlines()[0]
-    for hidden in ["info", "summary", "overlap", "skill"]:
+    for hidden in ["summary", "overlap", "analyze"]:
         assert hidden not in usage_line
 
     # 'agent-guide' is public, but 'agent' should be hidden
@@ -114,6 +117,24 @@ def test_skill_info():
     assert "limit" in schema["parameters"]
     assert schema["parameters"]["limit"]["type"] == "int"
     assert schema["parameters"]["limit"]["default"] == 15
+
+
+def test_hidden_skill_management_commands():
+    """Hidden skill management subcommands like add/remove/save should still parse correctly."""
+    result = subprocess.run(
+        [sys.executable, "-m", "nsys_ai", "skill", "add", "--help"], capture_output=True, text=True
+    )
+    assert result.returncode == 0
+    assert "skill_file" in result.stdout
+
+
+def test_evidence_requires_subcommand():
+    """'nsys-ai evidence' without a sub-action should fail fast (exit != 0)."""
+    result = subprocess.run(
+        [sys.executable, "-m", "nsys_ai", "evidence"], capture_output=True, text=True
+    )
+    assert result.returncode != 0
+    assert "build" in result.stderr  # argparse should mention valid choices
 
 
 def test_skill_run_duckdb_cache(tmp_path):
