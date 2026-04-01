@@ -183,6 +183,11 @@ class Profile:
     _log = logging.getLogger(__name__)
 
     def __init__(self, path: str, *, cache_mode: str = "auto"):
+        if cache_mode not in ("auto", "parquet", "direct"):
+            raise ValueError(
+                f"Unknown cache_mode: {cache_mode!r}. "
+                f"Expected 'auto', 'parquet', or 'direct'."
+            )
         self.path = path
         self._lock = threading.Lock()
         self._owns_conn = True
@@ -191,12 +196,6 @@ class Profile:
         self.schema = NsightSchema(self.conn)
         self.meta = self._discover()
         self._nvtx_has_text_id: bool = self._detect_nvtx_text_id()
-
-        if cache_mode not in ("auto", "parquet", "direct"):
-            raise ValueError(
-                f"Unknown cache_mode: {cache_mode!r}. "
-                f"Expected 'auto', 'parquet', or 'direct'."
-            )
 
         # DuckDB connection strategy — see parquet_cache module
         try:
@@ -214,10 +213,12 @@ class Profile:
                     size_mb = os.path.getsize(path) / 1e6
                     if size_mb > 50:
                         self._log.info(
-                            "Large profile (%.0fMB), using direct query mode (instant startup).\n"
-                            "To build a Parquet cache for faster repeated queries, re-run with "
-                            "cache_mode='parquet' or pre-build the cache.",
+                            "Large profile (%.0fMB), using direct query mode (instant startup).",
                             size_mb
+                        )
+                        self._log.info(
+                            "To build a Parquet cache for faster repeated queries, re-run with "
+                            "cache_mode='parquet' or pre-build the cache."
                         )
                         self.db = parquet_cache.open_direct_sqlite(path)
                     else:

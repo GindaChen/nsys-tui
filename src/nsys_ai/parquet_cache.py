@@ -222,11 +222,17 @@ def _build_cache_into(sqlite_path: str, cache_dir: Path) -> Path:
         # ── Progress reporting ─────────────────────────────────────────
         # Count total steps for progress display
         total_steps = sum(1 for _, src_name in _BASE_TABLES if _find_table(src_tables, src_name))
-        if _find_table(src_tables, "CUPTI_ACTIVITY_KIND_KERNEL"):
+
+        has_kernel = bool(_find_table(src_tables, "CUPTI_ACTIVITY_KIND_KERNEL"))
+        has_nvtx = bool(_find_table(src_tables, "NVTX_EVENTS"))
+        has_runtime = bool(_find_table(src_tables, "CUPTI_ACTIVITY_KIND_RUNTIME"))
+
+        if has_kernel:
             total_steps += 1
-        if _find_table(src_tables, "NVTX_EVENTS"):
+        if has_nvtx:
             total_steps += 1
-        total_steps += 1  # nvtx_kernel_map
+        if has_kernel and has_nvtx and has_runtime:
+            total_steps += 1
         step = [0]
 
         def _progress(name: str) -> None:
@@ -293,8 +299,9 @@ def _build_cache_into(sqlite_path: str, cache_dir: Path) -> Path:
                     """)
 
         # ── Generate nvtx_kernel_map ──────────────────────────────────────
-        _progress("nvtx_kernel_map.parquet")
-        _build_nvtx_kernel_map(db, src_tables, cache_dir, sqlite_path)
+        if has_kernel and has_nvtx and has_runtime:
+            _progress("nvtx_kernel_map.parquet")
+            _build_nvtx_kernel_map(db, src_tables, cache_dir, sqlite_path)
 
         # Clear progress line
         elapsed = time.monotonic() - t0
