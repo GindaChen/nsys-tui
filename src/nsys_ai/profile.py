@@ -182,7 +182,12 @@ class Profile:
 
     _log = logging.getLogger(__name__)
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, *, cache_mode: str = "auto"):
+        if cache_mode not in ("auto", "parquet", "direct"):
+            raise ValueError(
+                f"Unknown cache_mode: {cache_mode!r}. "
+                f"Expected 'auto', 'parquet', or 'direct'."
+            )
         self.path = path
         self._lock = threading.Lock()
         self._owns_conn = True
@@ -192,9 +197,33 @@ class Profile:
         self.meta = self._discover()
         self._nvtx_has_text_id: bool = self._detect_nvtx_text_id()
 
-        # DuckDB over Parquet cache — primary query path
+        # DuckDB connection strategy — see parquet_cache module
         try:
-            self.db: duckdb.DuckDBPyConnection = parquet_cache.open_cached_db(path)
+            if cache_mode == "direct":
+                # Force direct SQLite via DuckDB — zero ETL, instant startup
+                self.db: duckdb.DuckDBPyConnection = parquet_cache.open_direct_sqlite(path)
+            elif cache_mode == "parquet":
+                # Original behaviour: block until cache is built
+                self.db = parquet_cache.open_cached_db(path)
+            else:
+                # "auto" mode: use cache if valid, else smart fallback
+                if parquet_cache.is_cache_valid(path):
+                    self.db = parquet_cache.open_cached_db(path)
+                else:
+                    size_mb = os.path.getsize(path) / 1e6
+                    if size_mb > 50:
+                        self._log.info(
+                            "Large profile (%.0fMB), using direct query mode (instant startup).",
+                            size_mb
+                        )
+                        self._log.info(
+                            "To build a Parquet cache for faster repeated queries, re-run with "
+                            "cache_mode='parquet' or pre-build the cache."
+                        )
+                        self.db = parquet_cache.open_direct_sqlite(path)
+                    else:
+                        # Small file — build cache now (seconds)
+                        self.db = parquet_cache.open_cached_db(path)
         except Exception as e:
             self._log.warning("DuckDB cache unavailable, falling back to SQLite: %s", e)
             self.db = None  # type: ignore[assignment]
