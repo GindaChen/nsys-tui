@@ -169,6 +169,40 @@ _TABLE_PROJECTIONS: dict[str, str] = {
 }
 
 
+# Mapping from cache view name (e.g. "kernels") to the actual SQLite table names that
+# consumer queries might request. We use this to create stable alias views so queries
+# work regardless of which table string they use.
+_ALIASES: dict[str, list[str]] = {
+    "kernels": [
+        "CUPTI_ACTIVITY_KIND_KERNEL",
+        "CUPTI_ACTIVITY_KIND_KERNEL_V2",
+        "CUPTI_ACTIVITY_KIND_KERNEL_V3",
+    ],
+    "nvtx": ["NVTX_EVENTS"],
+    "runtime": [
+        "CUPTI_ACTIVITY_KIND_RUNTIME",
+        "CUPTI_ACTIVITY_KIND_RUNTIME_V2",
+        "CUPTI_ACTIVITY_KIND_RUNTIME_V3",
+    ],
+    "memcpy": [
+        "CUPTI_ACTIVITY_KIND_MEMCPY",
+        "CUPTI_ACTIVITY_KIND_MEMCPY_V2",
+        "CUPTI_ACTIVITY_KIND_MEMCPY_V3",
+    ],
+    "memset": [
+        "CUPTI_ACTIVITY_KIND_MEMSET",
+        "CUPTI_ACTIVITY_KIND_MEMSET_V2",
+        "CUPTI_ACTIVITY_KIND_MEMSET_V3",
+    ],
+    "string_ids": ["StringIds"],
+    "gpu_info": ["TARGET_INFO_GPU"],
+    "cuda_device": ["TARGET_INFO_CUDA_DEVICE"],
+    "thread_names": ["ThreadNames"],
+    "overhead": ["CUPTI_ACTIVITY_KIND_OVERHEAD"],
+    "composite_events": ["COMPOSITE_EVENTS"],
+}
+
+
 def _build_cache_into(sqlite_path: str, cache_dir: Path) -> Path:
     """Internal: build the Parquet cache into the given directory."""
 
@@ -361,39 +395,6 @@ def open_cached_db(sqlite_path: str) -> duckdb.DuckDBPyConnection:
         db.execute(
             f'CREATE VIEW "{view_name}" AS SELECT * FROM \'{safe_fpath}\''
         )
-
-    # ── Create alias views for SQLite table names ─────────────────────
-    # Consumer code uses original SQLite table names in SQL queries.
-    # These aliases let those queries work unchanged over DuckDB.
-    _ALIASES = {
-        "kernels": [
-            "CUPTI_ACTIVITY_KIND_KERNEL",
-            "CUPTI_ACTIVITY_KIND_KERNEL_V2",
-            "CUPTI_ACTIVITY_KIND_KERNEL_V3",
-        ],
-        "nvtx": ["NVTX_EVENTS"],
-        "runtime": [
-            "CUPTI_ACTIVITY_KIND_RUNTIME",
-            "CUPTI_ACTIVITY_KIND_RUNTIME_V2",
-            "CUPTI_ACTIVITY_KIND_RUNTIME_V3",
-        ],
-        "memcpy": [
-            "CUPTI_ACTIVITY_KIND_MEMCPY",
-            "CUPTI_ACTIVITY_KIND_MEMCPY_V2",
-            "CUPTI_ACTIVITY_KIND_MEMCPY_V3",
-        ],
-        "memset": [
-            "CUPTI_ACTIVITY_KIND_MEMSET",
-            "CUPTI_ACTIVITY_KIND_MEMSET_V2",
-            "CUPTI_ACTIVITY_KIND_MEMSET_V3",
-        ],
-        "string_ids": ["StringIds"],
-        "gpu_info": ["TARGET_INFO_GPU"],
-        "cuda_device": ["TARGET_INFO_CUDA_DEVICE"],
-        "thread_names": ["ThreadNames"],
-        "overhead": ["CUPTI_ACTIVITY_KIND_OVERHEAD"],
-        "composite_events": ["COMPOSITE_EVENTS"],
-    }
 
     existing_views = {r[0] for r in db.execute("SHOW TABLES").fetchall()}
     for parquet_name, aliases in _ALIASES.items():
@@ -764,3 +765,20 @@ def _create_sqlite_alias_views(db: duckdb.DuckDBPyConnection) -> None:
             )
         except duckdb.Error as e:
             _log.debug("Could not create alias view for %r: %s", table_name, e)
+
+    # For any table that exists in a versioned form, also create stable views
+    # for its aliases (including the unversioned name) so queries work seamlessly.
+    for aliases in _ALIASES.values():
+        base_name = aliases[0]
+        actual_table = _find_table(src_tables, base_name)
+        if actual_table:
+            actual_escaped = actual_table.replace('"', '""')
+            for alias in aliases:
+                alias_escaped = alias.replace('"', '""')
+                try:
+                    db.execute(
+                        f'CREATE VIEW IF NOT EXISTS "{alias_escaped}" '
+                        f'AS SELECT * FROM src."{actual_escaped}"'
+                    )
+                except duckdb.Error:
+                    pass
