@@ -221,8 +221,11 @@ def _build_cache_into(sqlite_path: str, cache_dir: Path) -> Path:
 
         # ── Progress reporting ─────────────────────────────────────────
         # Count total steps for progress display
-        total_steps = 2  # kernels + nvtx (always attempted)
-        total_steps += sum(1 for _, src_name in _BASE_TABLES if _find_table(src_tables, src_name))
+        total_steps = sum(1 for _, src_name in _BASE_TABLES if _find_table(src_tables, src_name))
+        if _find_table(src_tables, "CUPTI_ACTIVITY_KIND_KERNEL"):
+            total_steps += 1
+        if _find_table(src_tables, "NVTX_EVENTS"):
+            total_steps += 1
         total_steps += 1  # nvtx_kernel_map
         step = [0]
 

@@ -12,10 +12,10 @@ def test_invalid_cache_mode(minimal_nsys_db_path):
 
 
 def test_cache_mode_parquet(minimal_nsys_db_path):
-    prof = Profile(str(minimal_nsys_db_path), cache_mode="parquet")
-    # Execute a query using alias view syntax (which Parquet mode supports via registration)
-    res = prof.db.execute("SELECT COUNT(*) FROM CUPTI_ACTIVITY_KIND_RUNTIME").fetchone()
-    assert res[0] >= 0
+    with Profile(str(minimal_nsys_db_path), cache_mode="parquet") as prof:
+        # Execute a query using alias view syntax (which Parquet mode supports via registration)
+        res = prof.db.execute("SELECT COUNT(*) FROM CUPTI_ACTIVITY_KIND_RUNTIME").fetchone()
+        assert res[0] >= 0
 
     # Parquet cache MUST exist
     cache_dir = _cache_dir_for(str(minimal_nsys_db_path))
@@ -29,11 +29,10 @@ def test_cache_mode_direct(minimal_nsys_db_path, tmp_path):
     with open(minimal_nsys_db_path, "rb") as src, open(db_path, "wb") as dst:
         dst.write(src.read())
 
-    prof = Profile(str(db_path), cache_mode="direct")
-
-    # Verify the alias view exists and we can query unqualified
-    res = prof.db.execute("SELECT COUNT(*) FROM CUPTI_ACTIVITY_KIND_RUNTIME").fetchone()
-    assert res[0] >= 0
+    with Profile(str(db_path), cache_mode="direct") as prof:
+        # Verify the alias view exists and we can query unqualified
+        res = prof.db.execute("SELECT COUNT(*) FROM CUPTI_ACTIVITY_KIND_RUNTIME").fetchone()
+        assert res[0] >= 0
 
     # Parquet cache MUST NOT exist for direct scanning
     cache_dir = _cache_dir_for(str(db_path))
@@ -45,7 +44,8 @@ def test_cache_mode_auto_small(minimal_nsys_db_path, tmp_path):
     with open(minimal_nsys_db_path, "rb") as src, open(db_path, "wb") as dst:
         dst.write(src.read())
 
-    Profile(str(db_path), cache_mode="auto")
+    with Profile(str(db_path), cache_mode="auto"):
+        pass
 
     # small file (< 50MB) should build parquet
     cache_dir = _cache_dir_for(str(db_path))
@@ -59,12 +59,11 @@ def test_cache_mode_auto_large_mocked(minimal_nsys_db_path, tmp_path):
 
     # Mock os.path.getsize to return 100MB
     with mock.patch("os.path.getsize", return_value=100.0 * 1e6):
-        prof = Profile(str(db_path), cache_mode="auto")
+        with Profile(str(db_path), cache_mode="auto") as prof:
+            # Large file should fallback to direct scanning and NOT build parquet
+            cache_dir = _cache_dir_for(str(db_path))
+            assert not cache_dir.exists()
 
-    # Large file should fallback to direct scanning and NOT build parquet
-    cache_dir = _cache_dir_for(str(db_path))
-    assert not cache_dir.exists()
-
-    # Alias views should still be accessible
-    res = prof.db.execute("SELECT COUNT(*) FROM CUPTI_ACTIVITY_KIND_RUNTIME").fetchone()
-    assert res[0] >= 0
+            # Alias views should still be accessible
+            res = prof.db.execute("SELECT COUNT(*) FROM CUPTI_ACTIVITY_KIND_RUNTIME").fetchone()
+            assert res[0] >= 0
