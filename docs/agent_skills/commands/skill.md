@@ -80,6 +80,7 @@ Parameters marked **required** must be provided via `--param`.
 | Skill | Title | Description |
 |-------|-------|-------------|
 | `top_kernels` | Top GPU Kernels by Total Time | Lists the heaviest GPU kernels ranked by cumulative execution time. Use to identify hotspots. |
+| `tensor_core_usage` | Tensor Core Utilization | Ranks GPU kernels based on Tensor Core eligibility vs actual utilization. Detects FP32 fallbacks. |
 | `kernel_instances` | Kernel Instance Details | Returns individual kernel instances with exact **ns timestamps** (`start_ns`, `end_ns`). Use to get precise time ranges for `findings.json` evidence overlay. |
 | `kernel_launch_overhead` | Kernel Launch Overhead | Measures the gap between CUDA Runtime API call and GPU kernel execution. High overhead = CPU-side bottleneck. |
 | `kernel_launch_pattern` | Kernel Launch Pattern Analysis | Per-stream dispatch rate, burst density, inter-launch gaps, and sync-stall detection. |
@@ -308,17 +309,17 @@ No required parameters. Supports `--trim`.
 
 | Category | Count | What it covers |
 |----------|:-----:|----------------|
-| `kernels` | 8 | GPU kernel timing, instance details, launch overhead, MFU, FLOPs |
+| `kernels` | 9 | GPU kernel timing, instance details, launch overhead, MFU, FLOPs, Tensor Cores |
 | `memory` | 3 | H2D/D2H transfers, bandwidth, distribution |
 | `communication` | 4 | NCCL breakdown, anomalies, overlap, overlap matrix |
 | `nvtx` | 4 | NVTX→kernel mapping, layer breakdown, iterations, iteration detail |
 | `system` | 2 | CPU→GPU pipeline, thread utilization |
 | `analysis` | 2 | Root cause patterns, speedup estimates |
 | `utility` | 2 | Schema inspection, profile health manifest |
-| **Total** | **25** | |
+| **Total** | **26** | |
 
 > **Note**: `memory_transfers.py` registers 2 skills (`memory_transfers` + `h2d_distribution`).
-> There are exactly 25 unique Python builtin skills.
+> There are exactly 26 unique Python builtin skills.
 
 ---
 

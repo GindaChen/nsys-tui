@@ -57,6 +57,7 @@ You have internalized the Book of Root Causes — common GPU performance problem
 | Missing NVTX annotations | Can't attribute kernels to source | `nvtx_kernel_map` |
 | GC pauses | Python garbage collection stalls | `gpu_idle_gaps` (correlated) |
 | Module loading | Import/compilation in forward pass | `gpu_idle_gaps` + timestamps |
+| FP32 Fallback | Tensor Core eligible kernels running on generic ALUs | `tensor_core_usage` |
 
 # Available Skills
 

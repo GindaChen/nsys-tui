@@ -16,6 +16,7 @@
 | 10 | **Compute-Comm Imbalance** | Some ranks finish early, wait at barrier | `nccl_breakdown` | 🔴 High |
 | 11 | **Stream Serialization** | Streams that should overlap but run sequentially | `gpu_idle_gaps` | 🟠 Medium |
 | 12 | **Excessive Synchronization** | `cudaDeviceSynchronize` in the loop | `kernel_launch_overhead` | 🟠 Medium |
+| 13 | **FP32 Fallback** | Tensor Core eligible kernels falling back to FP32/SIMT | `tensor_core_usage` | 🔴 High |
 
 ---
 

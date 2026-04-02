@@ -31,7 +31,7 @@ import duckdb
 log = logging.getLogger(__name__)
 
 # Bump this when the cache schema changes (e.g., new columns, new tables).
-_CACHE_VERSION = 3  # bumped: CUPTI_ACTIVITY_KIND_RUNTIME now uses column projection
+_CACHE_VERSION = 4  # bumped: kernels.parquet now includes is_tc_eligible, uses_tc, name, demangled columns
 
 # Tables to export as-is from SQLite → Parquet.
 # (view_name, source_table_name)
@@ -168,6 +168,10 @@ _TABLE_PROJECTIONS: dict[str, str] = {
     "CUPTI_ACTIVITY_KIND_RUNTIME_V3": 'start, "end", correlationId, globalTid, nameId',
 }
 
+_TC_ELIGIBLE_PATTERN = "'(gemm|conv|linear|attention|matmul)'"
+_TC_ACTIVE_PATTERN = "'(xmma|mma_sync|16816|1688|884|ampere_bf16|sm80_tensor_op)'"
+
+
 
 # Mapping from cache view name (e.g. "kernels") to the actual SQLite table names that
 # consumer queries might request. We use this to create stable alias views so queries
@@ -284,7 +288,9 @@ def _build_cache_into(sqlite_path: str, cache_dir: Path) -> Path:
             _progress("kernels.parquet")
             db.execute(f"""
                 COPY (
-                    SELECT k.*, s.value AS name, d.value AS demangled
+                    SELECT k.*, COALESCE(d.value, s.value, 'kernel_' || CAST(k.shortName AS VARCHAR)) AS name, d.value AS demangled,
+                           CAST(CASE WHEN regexp_matches(lower(COALESCE(d.value, s.value, '')), {_TC_ELIGIBLE_PATTERN}) THEN 1 ELSE 0 END AS INTEGER) AS is_tc_eligible,
+                           CAST(CASE WHEN regexp_matches(lower(COALESCE(d.value, s.value, '')), {_TC_ACTIVE_PATTERN}) THEN 1 ELSE 0 END AS INTEGER) AS uses_tc
                     FROM src.{kernel_table} k
                     LEFT JOIN src.StringIds s ON k.shortName = s.id
                     LEFT JOIN src.StringIds d ON k.demangledName = d.id
@@ -478,11 +484,12 @@ def _build_nvtx_kernel_map(
         WITH kr AS (
             SELECT r.globalTid, r.start AS r_start, r."end" AS r_end,
                    k.start AS k_start, k."end" AS k_end, k.shortName,
-                   COALESCE(ks.value, 'kernel_' || CAST(k.shortName AS VARCHAR)) AS kernel_name,
+                   COALESCE(kd.value, ks.value, 'kernel_' || CAST(k.shortName AS VARCHAR)) AS kernel_name,
                    r.correlationId
             FROM src.{kernel_table} k
             JOIN src.{runtime_table} r ON r.correlationId = k.correlationId
             LEFT JOIN src.StringIds ks ON k.shortName = ks.id
+            LEFT JOIN src.StringIds kd ON k.demangledName = kd.id
         ),
         enclosing AS (
             SELECT kr.k_start, kr.k_end, kr.kernel_name,
@@ -736,6 +743,20 @@ def open_direct_sqlite(sqlite_path: str) -> duckdb.DuckDBPyConnection:
     return db
 
 
+def _tc_enriched_sql(table_name: str) -> str:
+    """Return SQL for a kernel table enriched with Tensor Core metrics."""
+    return f"""
+        SELECT k.*,
+               COALESCE(d.value, s.value, 'kernel_' || CAST(k.shortName AS VARCHAR)) AS name, 
+               d.value AS demangled,
+               CAST(CASE WHEN regexp_matches(lower(COALESCE(d.value, s.value, '')), {_TC_ELIGIBLE_PATTERN}) THEN 1 ELSE 0 END AS INTEGER) AS is_tc_eligible,
+               CAST(CASE WHEN regexp_matches(lower(COALESCE(d.value, s.value, '')), {_TC_ACTIVE_PATTERN}) THEN 1 ELSE 0 END AS INTEGER) AS uses_tc
+        FROM src."{table_name}" k
+        LEFT JOIN src.StringIds s ON k.shortName = s.id
+        LEFT JOIN src.StringIds d ON k.demangledName = d.id
+    """
+
+
 def _create_sqlite_alias_views(db: duckdb.DuckDBPyConnection) -> None:
     """Create views that alias ``src.TABLE_NAME → TABLE_NAME`` for consumer SQL."""
     _log = logging.getLogger(__name__)
@@ -758,27 +779,39 @@ def _create_sqlite_alias_views(db: duckdb.DuckDBPyConnection) -> None:
 
     for table_name in src_tables:
         escaped = table_name.replace('"', '""')
+        is_kernel = "KERNEL" in table_name.upper()
+        sql = _tc_enriched_sql(escaped) if is_kernel else f'SELECT * FROM src."{escaped}"'
         try:
             db.execute(
-                f'CREATE VIEW IF NOT EXISTS "{escaped}" '
-                f'AS SELECT * FROM src."{escaped}"'
+                f'CREATE VIEW IF NOT EXISTS "{escaped}" AS {sql}'
             )
         except duckdb.Error as e:
             _log.debug("Could not create alias view for %r: %s", table_name, e)
 
     # For any table that exists in a versioned form, also create stable views
     # for its aliases (including the unversioned name) so queries work seamlessly.
-    for aliases in _ALIASES.values():
+    for short_name, aliases in _ALIASES.items():
         base_name = aliases[0]
         actual_table = _find_table(src_tables, base_name)
         if actual_table:
             actual_escaped = actual_table.replace('"', '""')
+            is_kernel = "KERNEL" in base_name.upper()
+            sql = _tc_enriched_sql(actual_escaped) if is_kernel else f'SELECT * FROM src."{actual_escaped}"'
+            # Create view for versioned names (e.g. CUPTI_ACTIVITY_KIND_KERNEL_V2)
             for alias in aliases:
                 alias_escaped = alias.replace('"', '""')
                 try:
                     db.execute(
-                        f'CREATE VIEW IF NOT EXISTS "{alias_escaped}" '
-                        f'AS SELECT * FROM src."{actual_escaped}"'
+                        f'CREATE VIEW IF NOT EXISTS "{alias_escaped}" AS {sql}'
                     )
                 except duckdb.Error:
                     pass
+            # Also create a short-name view (e.g. "kernels") so skills can use FROM kernels
+            short_escaped = short_name.replace('"', '""')
+            try:
+                db.execute(
+                    f'CREATE VIEW IF NOT EXISTS "{short_escaped}" AS {sql}'
+                )
+            except duckdb.Error as e:
+                _log.debug("Could not create short-name alias view %r: %s", short_name, e)
+
