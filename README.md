@@ -357,7 +357,7 @@ Options:
 
 ## 🧩 Skills (Analysis Building Blocks)
 
-nsys-ai ships with 8 built-in SQL skills — self-contained analysis units that work without any LLM:
+nsys-ai ships with 29 built-in analysis skills — self-contained analysis units that work without any LLM:
 
 ```bash
 # List all available skills
@@ -379,6 +379,9 @@ nsys-ai skill run nccl_breakdown profile.sqlite
 | `kernel_launch_overhead` | CPU→GPU dispatch latency |
 | `thread_utilization` | CPU thread bottleneck detection |
 | `schema_inspect` | Database tables and columns |
+| `module_loading` | JIT compilation & module loading stalls |
+| `gc_impact` | GC & memory allocation stalls |
+| `pipeline_bubble_metrics` | True GPU idle percentage per device |
 
 Skills are extensible — add your own by creating a Python file that exports a `SKILL` constant.
 

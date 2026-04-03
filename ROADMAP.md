@@ -88,7 +88,7 @@ Three pillars: **UI** (effortless viewing), **AI** (effortless understanding), a
 
 > An intelligent agent that uses standardized SQL skills to diagnose GPU performance problems from first principles.
 
-**Skills Foundation** — 8 built-in SQL skills: `top_kernels`, `memory_transfers`, `nvtx_kernel_map`, `gpu_idle_gaps`, `nccl_breakdown`, `kernel_launch_overhead`, `thread_utilization`, `schema_inspect`. User-extensible skill registry.
+**Skills Foundation** — 29 built-in analysis skills including `top_kernels`, `memory_transfers`, `nvtx_kernel_map`, `gpu_idle_gaps`, `nccl_breakdown`, `kernel_launch_overhead`, `thread_utilization`, `schema_inspect`, `module_loading`, `gc_impact`, `pipeline_bubble_metrics`, and more. User-extensible skill registry.
 
 **New Skills (from competitive research):**
 
@@ -147,7 +147,7 @@ Three pillars: **UI** (effortless viewing), **AI** (effortless understanding), a
 - [x] Web UI server — `nsys-ai web` (v0.2.0)
 - [x] AI module — auto-commentary, NVTX suggestions, bottleneck detection (v0.1.0)
 - [x] PyPI package as `nsys-ai` (v0.2.1)
-- [x] Agent skill system — 8 built-in SQL skills + registry + CLI (v0.3.0)
+- [x] Agent skill system — 29 built-in analysis skills + registry + CLI (v0.3.0)
 - [x] Agent persona + analysis loop — `nsys-ai agent analyze|ask` (v0.3.0)
 - [x] Book of Root Causes — quick-ref, long-form, veteran questions (v0.3.0)
 - [x] Modular packaging — `[agent]`, `[all]` extras (v0.3.0)

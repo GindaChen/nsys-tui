@@ -1038,13 +1038,14 @@ Subsequent runs on the same profile are faster (~10-30s). Plan your tool calls a
    For token budget control, use `--max-rows N` on any skill to cap JSON output rows.
 1. **Orient**: Run `nsys-ai info <profile>` for quick metadata (GPU name, kernel count, time range).
    Then run `nsys-ai skill run schema_inspect <profile>` to see available tables.
-2. **Temporal Breakdown**: Check utilization and bubbles (`gpu_idle_gaps`, `top_kernels`).
+2. **Temporal Breakdown**: Check utilization and bubbles (`gpu_idle_gaps`, `top_kernels`, `pipeline_bubble_metrics` for true GPU idle %).
    If `gpu_idle_gaps` returns a `_summary` row with `gap_count: 0`, the GPU is well-utilized — this is a GOOD result, not an error.
 3. **Kernel Deep-Dive**: Identify the heaviest operations (`top_kernels`, `kernel_launch_overhead`).
 4. **NVTX Mapping**: Attribute GPU time to code regions (`nvtx_layer_breakdown`).
    If auto-detection returns low confidence, retry with explicit `-p depth=1` or `-p depth=2`.
 5. **Cross-GPU**: If applicable, analyze multi-GPU communication (`nccl_breakdown` for per-stream TP/PP/DP breakdown, `overlap_breakdown`, `kernel_overlap_matrix`).
-6. **Root Cause**: Run `root_cause_matcher` for automated pattern detection. Synthesize all evidence
+6. **Root Cause**: Run `root_cause_matcher` for automated pattern detection. Use `module_loading`
+   to detect JIT stalls, `gc_impact` to quantify memory allocation overhead. Synthesize all evidence
    and deliver specific, code-level actionable fixes.
 
 ## CLI Execution

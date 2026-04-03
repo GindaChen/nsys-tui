@@ -260,6 +260,27 @@ No required parameters. Supports `--trim`.
 
 ---
 
+### Category: `bottlenecks`
+
+| Skill | Title | Description |
+|-------|-------|-------------|
+| `module_loading` | JIT Compilation & Module Loading Stalls | Detects CUDA Driver/Runtime API calls for JIT compilation (`cuModuleLoadData`, `cuModuleLoad`, `cudaCompilePTX`) and module loading. Reports occurrence count, total/max/avg durations. Stalls during training (not init) indicate repeated JIT — a major pipeline bubble source. |
+| `gc_impact` | Garbage Collection & Memory Stalls | Quantifies CPU stalls from `cudaMalloc`/`cudaFree` (with versioned API names) and Python GC events (via NVTX). Dual-layer detection: CUDA Runtime API clustering + NVTX GC markers. Supports both `text` and `textId` NVTX schemas. |
+
+`module_loading` and `gc_impact` have no required parameters. Both support `--trim`.
+
+---
+
+### Category: `utilization`
+
+| Skill | Title | Description |
+|-------|-------|-------------|
+| `pipeline_bubble_metrics` | Pipeline Bubble Metrics (True Idle %) | Merges all overlapping kernel and memcpy intervals per GPU to compute exact active time vs. true idle time. Reports `Bubble %` — the fraction of GPU wall-time with zero activity. Essential input for MFU calculation. Uses O(n log n) Python interval merging. |
+
+`pipeline_bubble_metrics` has no required parameters. Supports `--trim`.
+
+---
+
 ### Category: `analysis`
 
 | Skill | Title | Description |
@@ -314,12 +335,14 @@ No required parameters. Supports `--trim`.
 | `communication` | 4 | NCCL breakdown, anomalies, overlap, overlap matrix |
 | `nvtx` | 4 | NVTX→kernel mapping, layer breakdown, iterations, iteration detail |
 | `system` | 2 | CPU→GPU pipeline, thread utilization |
+| `bottlenecks` | 2 | JIT/module loading stalls, GC/memory allocation stalls |
+| `utilization` | 1 | Pipeline bubble metrics (true GPU idle %) |
 | `analysis` | 2 | Root cause patterns, speedup estimates |
 | `utility` | 2 | Schema inspection, profile health manifest |
-| **Total** | **26** | |
+| **Total** | **29** | |
 
 > **Note**: `memory_transfers.py` registers 2 skills (`memory_transfers` + `h2d_distribution`).
-> There are exactly 26 unique Python builtin skills.
+> There are exactly 29 unique Python builtin skills.
 
 ---
 

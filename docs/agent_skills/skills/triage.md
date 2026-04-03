@@ -39,7 +39,7 @@ _How to detect parallelism_: Look at NCCL op types. Majority AllReduce → DP/FS
   - *Sync/idle-bound*: Idle > 30%
   - *Memory-bound*: H2D/D2H > 15%, or massive memcpy interleaved with compute
   - *Pipeline-bubble-bound* (PP only): Regular, long idle gaps near step boundaries
-**Suggested Approach**: Query the aggregate compute/NCCL breakdown (e.g., via the `overlap_breakdown` skill). Refer to [commands/skill.md](../commands/skill.md) to discover other skills tailored for checking idle gaps or memory bandwidth.
+**Suggested Approach**: Query the aggregate compute/NCCL breakdown (e.g., via the `overlap_breakdown` skill). Use `pipeline_bubble_metrics` for exact GPU idle % per device. Refer to [commands/skill.md](../commands/skill.md) to discover other skills tailored for checking idle gaps or memory bandwidth.
 
 ---
 
@@ -95,6 +95,8 @@ _How to detect parallelism_: Look at NCCL op types. Majority AllReduce → DP/FS
 | PP bubble | >10ms idle gap strictly at step boundaries | Increase micro-batch count, or use interleaved 1F1B scheduling. |
 | Unnecessary H2D transfer | Massive H2D memory copies inside the training loop | Ensure tensors stay on device; check for rogue `.item()` or `.cpu()` calls. |
 | Kernel serialization | Stream concurrency = 1 (kernels operate serially) | Verify ops aren't all defaulting to Stream 0; overlap via custom CUDA streams. |
+| JIT / module loading | `module_loading` shows repeated `cuModuleLoad*` outside init phase | Pre-compile with `torch.compile()` warmup; use `CUDA_MODULE_LOADING=EAGER`. |
+| GC / memory churn | `gc_impact` shows frequent `cudaFree` with long max stall | Pre-allocate tensors; set `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`; reduce Python object churn. |
 
 **Suggested Approach**: Match findings against known patterns (e.g., via the `root_cause_matcher` skill). Consult [commands/skill.md](../commands/skill.md) for estimation tools like `speedup_estimator` to quantify potential fixes.
 

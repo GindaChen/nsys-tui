@@ -188,7 +188,7 @@ These are **agent reasoning workflows** — step-by-step procedures for the LLM
 to follow when analyzing a profile. They tell the agent *how to think*, not just
 what tools to call.
 
-> **Not the same as builtin skills.** The 21 Python builtin skills
+> **Not the same as builtin skills.** The 29 Python builtin skills
 > (invoked via `nsys-ai skill run`) are documented in [`commands/skill.md`](commands/skill.md).
 > Those are executable analysis modules. The files below are reasoning guides.
 
