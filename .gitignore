@@ -5,7 +5,6 @@ dist/
 .pytest_cache/
 .DS_Store
 .venv/
-.venv-gpu/
 
 # Generated outputs (use `out/` for viewer/timeline-html/export -o)
 out/
