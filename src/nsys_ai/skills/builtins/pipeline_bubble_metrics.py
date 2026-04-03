@@ -28,6 +28,7 @@ def _execute(conn, **kwargs):
     tables = _resolve_activity_tables(conn)
     kernel_table = tables.get("kernel", "CUPTI_ACTIVITY_KIND_KERNEL")
     memcpy_table = tables.get("memcpy")
+    memset_table = tables.get("memset")
 
     trim_start = kwargs.get("trim_start_ns")
     trim_end = kwargs.get("trim_end_ns")
@@ -65,6 +66,22 @@ def _execute(conn, **kwargs):
         except Exception:
             pass
 
+    # --- Fetch memset intervals per device (if available) ---
+    memset_rows = []
+    if memset_table:
+        try:
+            params_s = []
+            trim_clause_s = ""
+            if trim_start is not None and trim_end is not None:
+                trim_clause_s = 'WHERE start >= ? AND "end" <= ?'
+                params_s = [trim_start, trim_end]
+            memset_rows = conn.execute(
+                f'SELECT deviceId, start, "end" FROM {memset_table} {trim_clause_s}',
+                params_s,
+            ).fetchall()
+        except Exception:
+            pass
+
     # --- Group intervals by deviceId ---
     from collections import defaultdict
 
@@ -72,6 +89,8 @@ def _execute(conn, **kwargs):
     for dev, s, e in kernel_rows:
         by_device[dev].append((s, e))
     for dev, s, e in memcpy_rows:
+        by_device[dev].append((s, e))
+    for dev, s, e in memset_rows:
         by_device[dev].append((s, e))
 
     if not by_device:
@@ -112,7 +131,7 @@ SKILL = Skill(
     title="Pipeline Bubble Metrics (True Idle Percentage)",
     description=(
         "Quantifies exact true pipeline bubble (idle time percentage) on GPUs. "
-        "It merges all overlapping compute kernels and memory transfers to find the "
+        "It merges all overlapping compute kernels, memory transfers, and memory sets (memset) to find the "
         "actual sum of time the GPU was doing work, and reports the remaining time "
         "as a pure bubble metric (Bubble %)."
     ),
