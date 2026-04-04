@@ -47,8 +47,10 @@ RowDict = dict[str, Any]
 def _compat_execute(conn, sql, params=None):
     """Execute SQL, translating bracket syntax for DuckDB connections."""
     import duckdb as _ddb
+
     if isinstance(conn, _ddb.DuckDBPyConnection):
         from .sql_compat import sqlite_to_duckdb
+
         sql = sqlite_to_duckdb(sql)
     return conn.execute(sql, params or [])
 
@@ -176,6 +178,7 @@ def _detect_nvtx_text_id(conn: sqlite3.Connection) -> bool:
     """Return True if NVTX_EVENTS uses textId -> StringIds."""
     try:
         import duckdb
+
         if isinstance(conn, duckdb.DuckDBPyConnection):
             cols = [r[0] for r in conn.execute("DESCRIBE NVTX_EVENTS").fetchall()]
         else:
@@ -754,6 +757,7 @@ def compute_region_mfu(
     to reuse its existing connection.
     """
     from nsys_ai.exceptions import NsysAiError
+
     try:
         sqlite_path = resolve_profile_path(profile_path)
     except NsysAiError as e:
@@ -762,6 +766,7 @@ def compute_region_mfu(
         return _error("PROFILE_NOT_LOADED", f"Profile error: {e}")
 
     from nsys_ai.ai.backend.profile_db_tool import open_profile_readonly
+
     conn = open_profile_readonly(sqlite_path)
     try:
         return compute_region_mfu_from_conn(

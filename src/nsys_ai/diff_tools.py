@@ -701,7 +701,9 @@ def get_launch_config_diff(
         else:
             # SQLite fallback: DESCRIBE is not valid, use PRAGMA
             with ctx.before._lock:
-                cols = [r[1] for r in ctx.before.conn.execute(f"PRAGMA table_info({kt})").fetchall()]
+                cols = [
+                    r[1] for r in ctx.before.conn.execute(f"PRAGMA table_info({kt})").fetchall()
+                ]
     except Exception:
         cols = []
     if not ("gridX" in cols or "blockX" in cols):

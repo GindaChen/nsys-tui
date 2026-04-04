@@ -110,3 +110,44 @@ def test_pipeline_bubble_metrics_no_tables_graceful(minimal_nsys_conn):
     skill = get_skill("pipeline_bubble_metrics")
     rows = skill.execute(minimal_nsys_conn)
     assert rows == []
+
+
+def test_arithmetic_intensity_execute(minimal_nsys_conn):
+    """Test arithmetic_intensity produces a roofline classification."""
+    from nsys_ai.skills.registry import get_skill
+
+    # Update the fixture GPU to A100 so we can test chip lookup
+    # TARGET_INFO_GPU already has id=0 from the fixture with chipName='TestChip'
+    minimal_nsys_conn.execute(
+        "UPDATE TARGET_INFO_GPU SET name='NVIDIA A100-SXM4-80GB', "
+        "chipName='GA100', memoryBandwidth=2039000000000 WHERE id=0"
+    )
+
+    skill = get_skill("arithmetic_intensity")
+    rows = skill.execute(minimal_nsys_conn, theoretical_flops=1e15)
+
+    assert len(rows) == 1
+    r = rows[0]
+    assert "error" not in r
+    assert "classification" in r
+    assert "achieved_tflops" in r
+    assert "mfu_pct" in r
+    assert r["peak_fp16_tflops"] == 312.0  # GA100 lookup
+
+
+def test_arithmetic_intensity_no_gpu_table(minimal_nsys_conn):
+    """Test arithmetic_intensity falls back when TARGET_INFO_GPU is missing."""
+    from nsys_ai.skills.registry import get_skill
+
+    skill = get_skill("arithmetic_intensity")
+    rows = skill.execute(
+        minimal_nsys_conn,
+        theoretical_flops=1e15,
+        peak_tflops=989.4,
+        hbm_bw_gbps=3352,
+    )
+
+    assert len(rows) == 1
+    r = rows[0]
+    assert "error" not in r
+    assert r["peak_fp16_tflops"] == 989.4  # User override

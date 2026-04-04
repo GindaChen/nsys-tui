@@ -31,6 +31,7 @@ class NsysAiError(Exception):
 
 # ── Profile errors ─────────────────────────────────────────────────────
 
+
 class ProfileError(NsysAiError):
     """Errors related to opening or querying profile databases."""
 
@@ -56,6 +57,7 @@ class SchemaError(ProfileError):
 
 # ── Export errors ──────────────────────────────────────────────────────
 
+
 class ExportError(NsysAiError):
     """Errors during .nsys-rep → .sqlite conversion (nsys export)."""
 
@@ -75,6 +77,7 @@ class ExportToolMissingError(ExportError):
 
 
 # ── Skill errors ───────────────────────────────────────────────────────
+
 
 class SkillError(NsysAiError):
     """Errors during skill execution."""

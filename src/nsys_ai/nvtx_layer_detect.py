@@ -25,9 +25,9 @@ from collections import Counter, defaultdict
 #   encoder.layers.0                → .0
 _NUMBERED_RE = re.compile(
     r"(?:"
-    r"\[(\d+)\]"          # TransformerBlock[0]
-    r"|\.(\d+)(?:\.|$)"   # encoder.layers.0
-    r"|[_\-](\d+)(?:_|$)" # layer_0, layer_0_bwd, block-3
+    r"\[(\d+)\]"  # TransformerBlock[0]
+    r"|\.(\d+)(?:\.|$)"  # encoder.layers.0
+    r"|[_\-](\d+)(?:_|$)"  # layer_0, layer_0_bwd, block-3
     r")"
 )
 

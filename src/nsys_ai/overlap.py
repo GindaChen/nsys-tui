@@ -155,8 +155,7 @@ def nccl_breakdown(prof: Profile, device: int, trim: tuple[int, int] | None = No
 
     # Precompute totals to avoid redundant sum() during sort
     computed_groups = [
-        (stream_id, ctype, sum(durs), durs)
-        for (stream_id, ctype), durs in by_stream_type.items()
+        (stream_id, ctype, sum(durs), durs) for (stream_id, ctype), durs in by_stream_type.items()
     ]
 
     result = []
@@ -237,15 +236,15 @@ def detect_iterations(
         text_join = ""
 
     pri_nvtx = prof._duckdb_query(
-            f"""
+        f"""
             SELECT {text_expr} AS text, n.start, n.[end] FROM {nvtx_table} n
             {text_join}
             WHERE {text_expr} LIKE ? AND n.[end] > n.start AND n.globalTid = ?
               AND n.start >= ? AND n.start <= ?
             ORDER BY n.start
         """,
-            (f"%{marker}%", primary_tid, time_range[0] - pad, time_range[1]),
-        )
+        (f"%{marker}%", primary_tid, time_range[0] - pad, time_range[1]),
+    )
 
     # Filter to non-overlapping (top-level only)
     iterations = []

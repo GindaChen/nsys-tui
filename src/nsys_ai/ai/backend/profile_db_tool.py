@@ -37,8 +37,8 @@ _READ_ONLY_BLOCK = re.compile(
     r"|COPY|EXPORT|ATTACH|DETACH|INSTALL|LOAD|PRAGMA|SET|CALL"
     r"|READ_CSV_AUTO|PARQUET_SCAN|READ_PARQUET|JSON_SCAN|CSV_AUTO_SCAN"
     r"|READ_CSV|READ_JSON|READ_JSON_AUTO)\b"
-    r"|\bFROM\s+'"                           # FROM 'path' (single-quoted = file)
-    r'|\bFROM\s+"(?=[^"]*[\\\\/.])[^"]*"'    # FROM "path/with.sep" (file path)
+    r"|\bFROM\s+'"  # FROM 'path' (single-quoted = file)
+    r'|\bFROM\s+"(?=[^"]*[\\\\/.])[^"]*"'  # FROM "path/with.sep" (file path)
     r")"
 )
 
@@ -138,8 +138,13 @@ def query_profile_db(
             upper = q.upper()
 
     # DuckDB translation for LLM-generated SQL
-    if isinstance(conn, duckdb.DuckDBPyConnection) and "SHOW TABLES" not in upper and "DESCRIBE " not in upper:
+    if (
+        isinstance(conn, duckdb.DuckDBPyConnection)
+        and "SHOW TABLES" not in upper
+        and "DESCRIBE " not in upper
+    ):
         from nsys_ai.sql_compat import sqlite_to_duckdb
+
         q = sqlite_to_duckdb(q)
         upper = q.upper()
 
@@ -170,7 +175,9 @@ def query_profile_db(
         # Determine column names (works for both duckdb and sqlite)
         names = [d[0] for d in cur.description] if cur.description else []
 
-        if getattr(conn, "row_factory", None) is sqlite3.Row and not isinstance(conn, duckdb.DuckDBPyConnection):
+        if getattr(conn, "row_factory", None) is sqlite3.Row and not isinstance(
+            conn, duckdb.DuckDBPyConnection
+        ):
             out = [dict(r) for r in rows]
         else:
             out = [dict(zip(names, r)) for r in rows]
@@ -273,7 +280,9 @@ _schema_cache: dict[str, str] = {}
 _schema_cache_lock = threading.Lock()
 
 
-def get_profile_schema_cached(conn: "sqlite3.Connection | duckdb.DuckDBPyConnection", path: str | None = None) -> str:
+def get_profile_schema_cached(
+    conn: "sqlite3.Connection | duckdb.DuckDBPyConnection", path: str | None = None
+) -> str:
     """
     Return schema for the given connection, using a cache keyed by path when provided.
     If path is None, always calls get_profile_schema(conn). Call with path when the

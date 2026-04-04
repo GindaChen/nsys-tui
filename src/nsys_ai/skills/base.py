@@ -31,15 +31,15 @@ def _resolve_activity_tables(conn: sqlite3.Connection) -> dict[str, str]:
     try:
         # DuckDB: use SHOW TABLES; SQLite: use sqlite_master
         import duckdb as _ddb
+
         if isinstance(conn, _ddb.DuckDBPyConnection):
-            tables = {
-                row[0]
-                for row in conn.execute("SHOW TABLES").fetchall()
-            }
+            tables = {row[0] for row in conn.execute("SHOW TABLES").fetchall()}
         else:
             tables = {
                 row[0]
-                for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
             }
     except (sqlite3.Error, ImportError) as exc:
         _log.debug("Failed to resolve activity tables: %s", exc, exc_info=True)
@@ -209,6 +209,7 @@ class Skill:
         if "{nvtx_text_expr}" in self.sql or "{nvtx_text_join}" in self.sql:
             try:
                 import duckdb as _ddb
+
                 if isinstance(conn, _ddb.DuckDBPyConnection):
                     cols = [r[0] for r in conn.execute(f"DESCRIBE {nvtx_tbl}").fetchall()]
                     has_textid = "textId" in cols
@@ -238,8 +239,10 @@ class Skill:
         sql = self.sql.format(**resolved) if resolved else self.sql
         # Apply DuckDB SQL translation if needed
         import duckdb as _ddb
+
         if isinstance(conn, _ddb.DuckDBPyConnection):
             from nsys_ai.sql_compat import sqlite_to_duckdb
+
             sql = sqlite_to_duckdb(sql)
         try:
             cursor = conn.execute(sql)
@@ -249,6 +252,7 @@ class Skill:
             db_errors = (sqlite3.Error,)
             try:
                 import duckdb
+
                 db_errors += (duckdb.Error,)
             except ImportError:
                 pass
@@ -257,9 +261,8 @@ class Skill:
                 raise
 
             from nsys_ai.exceptions import SkillExecutionError
-            raise SkillExecutionError(
-                f"SQL failed: {exc}", skill_name=self.name
-            ) from exc
+
+            raise SkillExecutionError(f"SQL failed: {exc}", skill_name=self.name) from exc
 
     def format_rows(self, rows: list[dict]) -> str:
         """Format pre-computed rows as text (no re-execution)."""

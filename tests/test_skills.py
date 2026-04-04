@@ -12,6 +12,7 @@ def test_list_skills():
     names = list_skills()
 
     expected = [
+        "arithmetic_intensity",
         "cpu_gpu_pipeline",
         "gc_impact",
         "gpu_idle_gaps",

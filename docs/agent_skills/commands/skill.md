@@ -88,6 +88,7 @@ Parameters marked **required** must be provided via `--param`.
 | `gpu_idle_gaps` | GPU Idle Gaps (Bubbles) | Finds idle gaps between consecutive GPU kernels with aggregation stats and CPU attribution. |
 | `region_mfu` | Region-Level MFU | Computes MFU for an NVTX region or kernel. Requires `name` and `theoretical_flops`. |
 | `theoretical_flops` | Theoretical FLOPs Calculator | Exact FLOPs for transformer operations (attention, mlp, full_model, etc.). LLMs should use this instead of manual multiplication. |
+| `arithmetic_intensity` | Arithmetic Intensity vs. GPU Peak (Roofline) | Aggregate roofline assessment: combines GPU hardware specs (peak TFLOPS, HBM BW) with kernel time and user-provided FLOPs. Reports MFU and classifies workload as compute-bound or memory-bound. |
 
 #### `top_kernels` Parameters
 
@@ -156,6 +157,15 @@ Parameters marked **required** must be provided via `--param`.
 | `M` / `N` / `K` | int | | 0 | For `linear` operation: matrix dimensions |
 
 \* `hidden_dim` and `seq_len` must be > 0 for all operations except `linear` (which uses `M`/`N`/`K` instead). Passing 0 returns an `INVALID_ARGUMENT` error.
+
+#### `arithmetic_intensity` Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|:--------:|---------|-------------|
+| `theoretical_flops` | float | ✅ | — | Total FLOPs for the profiled workload (use `theoretical_flops` skill to compute) |
+| `device` | int | | 0 | GPU device ID |
+| `peak_tflops` | float | | auto | Override GPU peak FP16 TFLOPS (auto-detected from chipName if omitted) |
+| `hbm_bw_gbps` | float | | auto | Override HBM bandwidth in GB/s (auto-detected if omitted) |
 
 ---
 
@@ -330,7 +340,7 @@ No required parameters. Supports `--trim`.
 
 | Category | Count | What it covers |
 |----------|:-----:|----------------|
-| `kernels` | 9 | GPU kernel timing, instance details, launch overhead, MFU, FLOPs, Tensor Cores |
+| `kernels` | 10 | GPU kernel timing, instance details, launch overhead, MFU, FLOPs, Tensor Cores, roofline |
 | `memory` | 3 | H2D/D2H transfers, bandwidth, distribution |
 | `communication` | 4 | NCCL breakdown, anomalies, overlap, overlap matrix |
 | `nvtx` | 4 | NVTX→kernel mapping, layer breakdown, iterations, iteration detail |
@@ -339,10 +349,10 @@ No required parameters. Supports `--trim`.
 | `utilization` | 1 | Pipeline bubble metrics (true GPU idle %) |
 | `analysis` | 2 | Root cause patterns, speedup estimates |
 | `utility` | 2 | Schema inspection, profile health manifest |
-| **Total** | **29** | |
+| **Total** | **30** | |
 
 > **Note**: `memory_transfers.py` registers 2 skills (`memory_transfers` + `h2d_distribution`).
-> There are exactly 29 unique Python builtin skills.
+> There are exactly 30 unique Python builtin skills.
 
 ---
 

@@ -23,15 +23,15 @@ def _find_kernel_threads(profile, device: int, min_pct: float = 0.5) -> list[int
     collectives on this device but bring unrelated NVTX context.
     """
     rows = profile._duckdb_query(
-            f"""
+        f"""
             SELECT r.globalTid, COUNT(*) as cnt
             FROM CUPTI_ACTIVITY_KIND_RUNTIME r
             JOIN {profile.schema.kernel_table} k ON r.correlationId = k.correlationId
             WHERE k.deviceId = ?
             GROUP BY r.globalTid ORDER BY cnt DESC
         """,
-            (device,),
-        )
+        (device,),
+    )
     if not rows:
         return []
     top_cnt = rows[0]["cnt"]
@@ -49,14 +49,14 @@ def _get_thread_name(profile, tid: int) -> str:
     """Look up thread name from ThreadNames+StringIds tables. Returns '' if unknown."""
     try:
         row = profile._duckdb_query(
-                """
+            """
                 SELECT s.value FROM ThreadNames t
                 JOIN StringIds s ON t.nameId = s.id
                 WHERE t.globalTid = ?
                 ORDER BY t.priority DESC LIMIT 1
             """,
-                (tid,),
-            )
+            (tid,),
+        )
         return row[0]["value"] if row else ""
     except Exception as exc:
         _log.debug("Thread name lookup failed for tid=%d: %s", tid, exc, exc_info=True)
@@ -107,12 +107,12 @@ def _build_single_thread_tree(
     rt_lo = min(int(n["start"]) for n in nvtx_rows)
     rt_hi = max(int(n["end"]) for n in nvtx_rows) + int(2e9)
     rt_rows = profile._duckdb_query(
-            """
+        """
             SELECT start, [end], correlationId FROM CUPTI_ACTIVITY_KIND_RUNTIME
             WHERE globalTid = ? AND start >= ? AND [end] <= ?  ORDER BY start
         """,
-            (tid, rt_lo, rt_hi),
-        )
+        (tid, rt_lo, rt_hi),
+    )
 
     # Build projected entries: each NVTX span → projected GPU bounds + child kernels
     entries = []  # list of {name, gpu_start, gpu_end, cpu_start, cpu_end, kernels: [...]}

@@ -7,7 +7,6 @@ and produces a structured analysis report. Works without LLM by default
 extra installed, can delegate to an LLM for natural language analysis.
 """
 
-
 import logging
 import sqlite3
 
@@ -44,7 +43,12 @@ class Agent:
         "nccl": ["nccl_breakdown", "overlap_breakdown", "kernel_overlap_matrix", "nccl_anomaly"],
         "allreduce": ["nccl_breakdown", "nccl_anomaly"],
         "collective": ["nccl_breakdown", "nccl_anomaly"],
-        "distributed": ["nccl_breakdown", "overlap_breakdown", "kernel_overlap_matrix", "nccl_anomaly"],
+        "distributed": [
+            "nccl_breakdown",
+            "overlap_breakdown",
+            "kernel_overlap_matrix",
+            "nccl_anomaly",
+        ],
         "multi-gpu": ["nccl_breakdown", "overlap_breakdown", "kernel_overlap_matrix"],
         "anomaly": ["nccl_anomaly"],
         "outlier": ["nccl_anomaly"],
@@ -99,8 +103,10 @@ class Agent:
             self.profile = Profile(profile_path)
         except (NsysAiError, sqlite3.Error, ValueError) as e:
             import sqlite3 as _sqlite3
+
             log.warning(
-                "Could not open as Nsight profile (skills may be limited): %s", e,
+                "Could not open as Nsight profile (skills may be limited): %s",
+                e,
             )
             # Fallback: open as a raw SQLite connection so the agent can still
             # run generic SQL queries even if schema detection fails.

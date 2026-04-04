@@ -52,6 +52,7 @@ class NsightSchema:
     def __init__(self, conn: sqlite3.Connection):
         self._conn = conn
         import duckdb as _ddb
+
         if isinstance(conn, _ddb.DuckDBPyConnection):
             cur = self._conn.execute("SHOW TABLES")
             self.tables: list[str] = [r[0] for r in cur.fetchall()]
@@ -73,6 +74,7 @@ class NsightSchema:
             return {}
 
         import duckdb as _ddb
+
         if isinstance(self._conn, _ddb.DuckDBPyConnection):
             cur = self._conn.execute(f"DESCRIBE {table}")
             cols = [row[0] for row in cur.fetchall()]  # 0 = column_name
@@ -185,8 +187,7 @@ class Profile:
     def __init__(self, path: str, *, cache_mode: str = "auto"):
         if cache_mode not in ("auto", "parquet", "direct"):
             raise ValueError(
-                f"Unknown cache_mode: {cache_mode!r}. "
-                f"Expected 'auto', 'parquet', or 'direct'."
+                f"Unknown cache_mode: {cache_mode!r}. Expected 'auto', 'parquet', or 'direct'."
             )
         self.path = path
         self._lock = threading.Lock()
@@ -214,7 +215,7 @@ class Profile:
                     if size_mb > 50:
                         self._log.info(
                             "Large profile (%.0fMB), using direct query mode (instant startup).",
-                            size_mb
+                            size_mb,
                         )
                         self._log.info(
                             "To build a Parquet cache for faster repeated queries, re-run with "
@@ -257,10 +258,13 @@ class Profile:
             return False
         try:
             import duckdb
+
             if isinstance(self.conn, duckdb.DuckDBPyConnection):
                 cols = [r[0] for r in self.conn.execute("DESCRIBE NVTX_EVENTS").fetchall()]
             else:
-                cols = [r[1] for r in self.conn.execute("PRAGMA table_info(NVTX_EVENTS)").fetchall()]
+                cols = [
+                    r[1] for r in self.conn.execute("PRAGMA table_info(NVTX_EVENTS)").fetchall()
+                ]
             return "textId" in cols
         except (sqlite3.Error, duckdb.Error):
             self._log.debug("NVTX textId detection failed", exc_info=True)
@@ -282,6 +286,7 @@ class Profile:
         kernel_table = self.schema.kernel_table
 
         import duckdb
+
         is_duckdb = isinstance(self.conn, duckdb.DuckDBPyConnection)
 
         devices = [
@@ -297,7 +302,7 @@ class Profile:
         ).fetchall():
             streams.setdefault(r[0], []).append(r[1])
 
-        end_col = '"end"' if is_duckdb else '[end]'
+        end_col = '"end"' if is_duckdb else "[end]"
         tr = self.conn.execute(f"SELECT MIN(start), MAX({end_col}) FROM {kernel_table}").fetchone()
 
         kc = self.conn.execute(f"SELECT COUNT(*) FROM {kernel_table}").fetchone()[0]
@@ -667,9 +672,7 @@ class Profile:
                 return [dict(zip(cols, row)) for row in cur.fetchall()]
         else:
             if not getattr(self, "_warned_sqlite_fallback", False):
-                self._log.warning(
-                    "DuckDB unavailable, falling back to SQLite (slower)"
-                )
+                self._log.warning("DuckDB unavailable, falling back to SQLite (slower)")
                 self._warned_sqlite_fallback = True
             with self._lock:
                 return [dict(r) for r in conn.execute(sql, params or [])]

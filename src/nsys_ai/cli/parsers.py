@@ -29,6 +29,7 @@ from .handlers import (
     _cmd_overlap,
     _cmd_perfetto,
     _cmd_report,
+    _cmd_root_cause,
     _cmd_search,
     _cmd_skill,
     _cmd_summary,
@@ -162,9 +163,7 @@ def _register_evidence_parser(sub):
     """Register the ``evidence`` subcommand tree on *sub*."""
     p = sub.add_parser("evidence", help="Build evidence findings for timeline overlay")
     evidence_sub = p.add_subparsers(dest="evidence_action", required=True)
-    sp_build = evidence_sub.add_parser(
-        "build", help="Run heuristic analyzers → findings JSON"
-    )
+    sp_build = evidence_sub.add_parser("build", help="Run heuristic analyzers → findings JSON")
     sp_build.add_argument("profile", help="Path to profile (.sqlite or .nsys-rep)")
     sp_build.add_argument(
         "--format",
@@ -187,10 +186,26 @@ def _register_evidence_parser(sub):
         help="Time window in seconds",
     )
     sp_build.add_argument("--gpu", type=int, default=0, help="GPU device ID (default: 0)")
-    sp_build.add_argument(
-        "-o", "--output", default=None, help="Write findings JSON to file"
-    )
+    sp_build.add_argument("-o", "--output", default=None, help="Write findings JSON to file")
     p.set_defaults(handler=_cmd_evidence)
+    return p
+
+
+def _register_root_cause_parser(sub):
+    """Register the ``root-cause`` subcommand tree on *sub*."""
+    p = sub.add_parser("root-cause", help="Browse and submit root cause patterns")
+    p.add_argument(
+        "--root-causes-dir",
+        default=None,
+        help="Directory for user root cause files (default: ~/.nsys-ai/root-causes/)",
+    )
+    rc_sub = p.add_subparsers(dest="rc_action")
+    rc_sub.add_parser("list", help="List all known root cause patterns")
+    sp_show = rc_sub.add_parser("show", help="Show details of a root cause")
+    sp_show.add_argument("rc_name", help="Root cause name (substring match)")
+    sp_submit = rc_sub.add_parser("submit", help="Submit a new root cause pattern")
+    sp_submit.add_argument("rc_file", help="Path to root cause .md file")
+    p.set_defaults(handler=_cmd_root_cause)
     return p
 
 
@@ -347,6 +362,7 @@ def _build_parser():
     _register_info_parser(sub)
     _register_skill_parser(sub, include_management=False)
     _register_evidence_parser(sub)
+    _register_root_cause_parser(sub)
 
     sub.add_parser("help", help="Show getting-started guide and available commands")
 

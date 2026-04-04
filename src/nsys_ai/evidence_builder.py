@@ -64,7 +64,9 @@ class EvidenceBuilder:
             try:
                 skill = get_skill(skill_name)
                 if skill is None:
-                    _log.debug("Analyzer %s skipped (skill %s not found)", analyzer_name, skill_name)
+                    _log.debug(
+                        "Analyzer %s skipped (skill %s not found)", analyzer_name, skill_name
+                    )
                     continue
 
                 # Map runtime parameters into skill args
@@ -79,11 +81,12 @@ class EvidenceBuilder:
                 if skill.to_findings_fn:
                     findings.extend(skill.to_findings_fn(rows))
             except Exception as e:
-                _log.error("Analyzer %s (skill %s) failed: %s", analyzer_name, skill_name, e, exc_info=True)
+                _log.error(
+                    "Analyzer %s (skill %s) failed: %s", analyzer_name, skill_name, e, exc_info=True
+                )
 
         return EvidenceReport(
             title="Auto-Analysis",
             profile_path=getattr(self.prof, "path", ""),
             findings=findings,
         )
-

@@ -412,6 +412,7 @@ def chat_completion(body_bytes: bytes) -> dict | None:
     profile_path = payload.get("profile_path")
 
     from nsys_ai.exceptions import NsysAiError
+
     try:
         conn, sqlite_path, system_prompt, query_runner = _prepare_session(
             profile_path, messages, ui_context
@@ -577,6 +578,7 @@ def stream_agent_loop(
         query_runner = None
     else:
         from nsys_ai.exceptions import NsysAiError
+
         try:
             conn, sqlite_path, system_prompt, query_runner = _prepare_session(
                 profile_path, messages, ui_context, skill_names

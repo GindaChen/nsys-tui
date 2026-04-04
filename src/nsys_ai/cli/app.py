@@ -59,6 +59,11 @@ def show_help():
     print('    nsys-ai agent ask <profile> "question"   Ask about a profile')
     print("    nsys-ai agent-guide                      Print agent System Prompt")
     print()
+    print("  Root Causes:")
+    print("    nsys-ai root-cause list                  List known root cause patterns")
+    print("    nsys-ai root-cause show <name>           Show root cause details")
+    print("    nsys-ai root-cause submit <file.md>      Submit a new pattern")
+    print()
     print("  Export:")
     print("    nsys-ai export     <profile> -o DIR       Perfetto JSON traces")
     print("    nsys-ai export-csv <profile> --gpu N       CSV export")
@@ -99,9 +104,7 @@ def main():
         "agent",
     }
     use_legacy_skill_mgmt = (
-        len(sys.argv) > 2
-        and sys.argv[1] == "skill"
-        and sys.argv[2] in {"add", "remove", "save"}
+        len(sys.argv) > 2 and sys.argv[1] == "skill" and sys.argv[2] in {"add", "remove", "save"}
     )
     if len(sys.argv) > 1 and (sys.argv[1] in legacy_commands or use_legacy_skill_mgmt):
         parser = _build_legacy_parser()

@@ -87,6 +87,7 @@ def ensure_performance_indexes(conn: sqlite3.Connection) -> None:
     # DuckDB connections (Parquet cache) don't need SQLite indexes.
     try:
         import duckdb as _ddb
+
         if isinstance(conn, _ddb.DuckDBPyConnection):
             return
     except ImportError:
@@ -159,9 +160,19 @@ def ensure_performance_indexes(conn: sqlite3.Connection) -> None:
         except sqlite3.OperationalError as exc:
             # "no such table" is expected (profile may lack NVTX/NCCL data).
             # Other OperationalError (locked, readonly) logged for diagnostics.
-            _log.debug("ensure_performance_indexes: %s — %s", stmt.split("ON")[0].strip(), exc, exc_info=True)
+            _log.debug(
+                "ensure_performance_indexes: %s — %s",
+                stmt.split("ON")[0].strip(),
+                exc,
+                exc_info=True,
+            )
         except Exception as exc:
-            _log.debug("ensure_performance_indexes: %s — %s", stmt.split("ON")[0].strip(), exc, exc_info=True)
+            _log.debug(
+                "ensure_performance_indexes: %s — %s",
+                stmt.split("ON")[0].strip(),
+                exc,
+                exc_info=True,
+            )
 
     if any_success:
         try:

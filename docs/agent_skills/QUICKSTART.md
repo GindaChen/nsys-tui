@@ -57,7 +57,7 @@ You have two ways to interact with the profile:
 | External agent onboarding | `nsys-ai agent-guide` |
 
 **Analysis Skills**: Use `nsys-ai skill run <name> profile.sqlite` to run specific
-analysis modules. See [`commands/skill.md`](commands/skill.md) for the full catalog of 29 builtin skills.
+analysis modules. See [`commands/skill.md`](commands/skill.md) for the full catalog of 30 builtin skills.
 
 > **After analysis**: Generate evidence with `nsys-ai evidence build profile.sqlite --format json`
 > or manually encode conclusions as `findings.json`, then open
@@ -124,7 +124,7 @@ docs/agent_skills/
 │   ├── skilldoc.md    /nsys:skilldoc (documentation audit)
 │   ├── evidence_schema.md  Finding JSON schema
 │   ├── evidence-build.md   nsys-ai evidence build CLI
-│   ├── skill.md       nsys-ai skill CLI + builtin catalog (29 Python skills)
+│   ├── skill.md       nsys-ai skill CLI + builtin catalog (30 Python skills)
 │   └── agent-guide.md nsys-ai agent-guide (external agent onboarding)
 └── skills/            ← LLM workflow guides (load on demand)
     ├── SKILL_TEMPLATE.md

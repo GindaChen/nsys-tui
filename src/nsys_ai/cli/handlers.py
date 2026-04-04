@@ -562,7 +562,9 @@ def _cmd_evidence(args, _profile):
     from nsys_ai.evidence_builder import EvidenceBuilder
 
     if getattr(args, "evidence_action", None) != "build":
-        print("Usage: nsys-ai evidence build <profile.sqlite> [--format json|text] [--analyzers a,b,c]")
+        print(
+            "Usage: nsys-ai evidence build <profile.sqlite> [--format json|text] [--analyzers a,b,c]"
+        )
         return
 
     with _profile.open(args.profile) as prof:
@@ -575,7 +577,9 @@ def _cmd_evidence(args, _profile):
 
         analyzers_raw = getattr(args, "analyzers", None)
         if analyzers_raw:
-            only_analyzers = [name for name in (part.strip() for part in analyzers_raw.split(",")) if name]
+            only_analyzers = [
+                name for name in (part.strip() for part in analyzers_raw.split(",")) if name
+            ]
             report = builder.build(only=only_analyzers) if only_analyzers else builder.build()
         else:
             report = builder.build()
@@ -586,7 +590,7 @@ def _cmd_evidence(args, _profile):
             out_report = {
                 "title": getattr(report, "title", "Evidence Report"),
                 "profile_path": getattr(report, "profile_path", args.profile),
-                "findings": findings
+                "findings": findings,
             }
             print(json.dumps(out_report, indent=2))
         else:
@@ -608,13 +612,19 @@ def _cmd_evidence(args, _profile):
                 try:
                     os.makedirs(out_dir, exist_ok=True)
                 except OSError as e:
-                    print(f"Error: Failed to create output directory '{out_dir}': {e}", file=sys.stderr, flush=True)
+                    print(
+                        f"Error: Failed to create output directory '{out_dir}': {e}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                     sys.exit(1)
 
             try:
                 save_findings(report, out)
             except OSError as e:
-                print(f"Error: Failed to write findings to '{out}': {e}", file=sys.stderr, flush=True)
+                print(
+                    f"Error: Failed to write findings to '{out}': {e}", file=sys.stderr, flush=True
+                )
                 sys.exit(1)
             print(f"Saved {len(findings)} finding(s) → {out}", flush=True, file=sys.stderr)
 
@@ -630,11 +640,13 @@ def _apply_max_rows_truncation(rows: list, max_rows: int) -> list:
         total = len(rows)
         # Convert to list to ensure we don't mutate an original view/tuple
         truncated = list(rows[:max_rows])
-        truncated.append({
-            "_truncated": True,
-            "_total_rows": total,
-            "_shown_rows": max_rows,
-        })
+        truncated.append(
+            {
+                "_truncated": True,
+                "_total_rows": total,
+                "_shown_rows": max_rows,
+            }
+        )
         return truncated
     return rows
 
@@ -696,9 +708,10 @@ def _cmd_skill(args, _profile):
                     "type": p.type,
                     "description": getattr(p, "description", ""),
                     "default": p.default,
-                    "required": p.required
-                } for p in skill.params
-            }
+                    "required": p.required,
+                }
+                for p in skill.params
+            },
         }
         print(_json.dumps(schema, indent=2))
     elif args.skill_action == "run":
@@ -713,12 +726,14 @@ def _cmd_skill(args, _profile):
         try:
             if no_cache:
                 from nsys_ai.parquet_cache import open_direct_sqlite
+
                 conn = open_direct_sqlite(args.profile)
             else:
                 conn = open_cached_db(args.profile)
         except (duckdb.Error, RuntimeError, OSError) as exc:
             # Fallback to raw SQLite if DuckDB/Parquet cache fails
             import logging
+
             logging.getLogger("nsys_ai").warning(
                 "DuckDB cache unavailable (%s), falling back to raw SQLite", exc
             )
@@ -1065,3 +1080,62 @@ Examples:
 """
     print(guide)
     print(skill_catalog())
+
+
+def _cmd_root_cause(args, _profile):
+    """Handle root-cause list/show/submit subcommands."""
+    from nsys_ai.root_cause_store import list_entries, submit_entry
+
+    rc_dir = getattr(args, "root_causes_dir", None) or os.environ.get("NSYS_AI_ROOT_CAUSES_DIR")
+
+    action = getattr(args, "rc_action", None)
+    if action == "list":
+        entries = list_entries(root_causes_dir=rc_dir)
+        if not entries:
+            print("No root cause entries found.")
+            return
+        print(f"{'Name':<40s}  {'Severity':<10s}  {'Source':<10s}  Tags")
+        print("-" * 90)
+        for e in entries:
+            tags = ", ".join(e.tags) if e.tags else ""
+            print(f"{e.name:<40s}  {e.severity:<10s}  {e.source:<10s}  {tags}")
+        print(f"\n{len(entries)} root cause(s) total.")
+    elif action == "show":
+        name = args.rc_name
+        entries = list_entries(root_causes_dir=rc_dir)
+        match = [e for e in entries if name.lower() in e.name.lower()]
+        if not match:
+            print(f"No root cause matching '{name}' found.", file=sys.stderr)
+            sys.exit(1)
+        for e in match:
+            lines = [
+                f"═══ {e.name} ═══",
+                f"  Severity:        {e.severity}",
+                f"  Source:           {e.source}",
+                f"  Tags:            {', '.join(e.tags) if e.tags else '—'}",
+                f"  Detection Skill: {e.detection_skill or '—'}",
+            ]
+            if e.symptom:
+                lines.append(f"\n  ## Symptom\n  {e.symptom}")
+            if e.mechanism:
+                lines.append(f"\n  ## Why It Happens\n  {e.mechanism}")
+            if e.detection:
+                lines.append(f"\n  ## How to Detect\n  {e.detection}")
+            if e.fix:
+                lines.append(f"\n  ## How to Fix\n  {e.fix}")
+            if e.example:
+                lines.append(f"\n  ## Real-World Example\n  {e.example}")
+            print("\n".join(lines))
+            print()
+    elif action == "submit":
+        path = args.rc_file
+        entry, errors = submit_entry(path, dest_dir=rc_dir)
+        if errors:
+            print("❌ Validation failed:", file=sys.stderr)
+            for err in errors:
+                print(f"   - {err}", file=sys.stderr)
+            sys.exit(1)
+        print(f"✅ Submitted: '{entry.name}' → {entry.file_path}")
+    else:
+        print("Usage: nsys-ai root-cause {list|show|submit}", file=sys.stderr)
+        sys.exit(1)

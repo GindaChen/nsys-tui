@@ -106,7 +106,7 @@ Load skill files on demand. Do not pre-load all of them.
 These are **reasoning workflows** for the LLM agent, not executable code.
 
 > **Builtin analysis skills** (executable via `nsys-ai skill run`) are documented
-> separately in [`commands/skill.md`](commands/skill.md). Those are 29 Python builtin skills
+> separately in [`commands/skill.md`](commands/skill.md). Those are 30 Python builtin skills
 > for targeted analysis (e.g. `top_kernels`, `gpu_idle_gaps`, `root_cause_matcher`).
 
 | When the user asks… | Load this file |
