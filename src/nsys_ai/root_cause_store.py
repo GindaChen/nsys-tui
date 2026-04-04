@@ -50,7 +50,7 @@ class RootCauseEntry:
 # Parsing
 # ---------------------------------------------------------------------------
 
-_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+_FRONTMATTER_RE = re.compile(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n", re.DOTALL)
 _SECTION_RE = re.compile(r"^##\s+(.+)$", re.MULTILINE)
 
 

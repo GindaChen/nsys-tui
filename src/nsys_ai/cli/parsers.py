@@ -199,7 +199,7 @@ def _register_root_cause_parser(sub):
         default=None,
         help="Directory for user root cause files (default: ~/.nsys-ai/root-causes/)",
     )
-    rc_sub = p.add_subparsers(dest="rc_action")
+    rc_sub = p.add_subparsers(dest="rc_action", required=True)
     rc_sub.add_parser("list", help="List all known root cause patterns")
     sp_show = rc_sub.add_parser("show", help="Show details of a root cause")
     sp_show.add_argument("rc_name", help="Root cause name (substring match)")

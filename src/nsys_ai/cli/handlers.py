@@ -1131,11 +1131,11 @@ def _cmd_root_cause(args, _profile):
         path = args.rc_file
         entry, errors = submit_entry(path, dest_dir=rc_dir)
         if errors:
-            print("❌ Validation failed:", file=sys.stderr)
+            print("ERROR: Validation failed:", file=sys.stderr)
             for err in errors:
                 print(f"   - {err}", file=sys.stderr)
             sys.exit(1)
-        print(f"✅ Submitted: '{entry.name}' → {entry.file_path}")
+        print(f"OK: Submitted: '{entry.name}' -> {entry.file_path}")
     else:
         print("Usage: nsys-ai root-cause {list|show|submit}", file=sys.stderr)
         sys.exit(1)

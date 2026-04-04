@@ -7,11 +7,7 @@ Since Nsight Systems .sqlite does NOT contain per-kernel FLOPs or bytes-moved
 (only NCU has that), this skill performs an **aggregate roofline estimation**.
 """
 
-import logging
-
 from ..base import Skill, SkillParam, _resolve_activity_tables
-
-logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # GPU spec lookup table: chipName → (peak FP16 TFLOPS, HBM BW GB/s)
@@ -141,13 +137,15 @@ def _execute(conn, **kwargs):
         params.extend([trim_start, trim_end])
 
     try:
-        row = conn.execute(
-            f'SELECT SUM("end" - start), COUNT(*) FROM {kernel_table} '
+        rows = conn.execute(
+            f'SELECT start, "end" FROM {kernel_table} '
             f"WHERE deviceId = ? {trim_clause}",
             params,
-        ).fetchone()
-        total_kernel_ns = row[0] or 0
-        kernel_count = row[1] or 0
+        ).fetchall()
+        
+        from nsys_ai.region_mfu import _merge_intervals
+        total_kernel_ns = _merge_intervals([(row[0], row[1]) for row in rows])
+        kernel_count = len(rows)
     except Exception:
         total_kernel_ns = 0
         kernel_count = 0

@@ -139,6 +139,7 @@ def test_arithmetic_intensity_no_gpu_table(minimal_nsys_conn):
     """Test arithmetic_intensity falls back when TARGET_INFO_GPU is missing."""
     from nsys_ai.skills.registry import get_skill
 
+    minimal_nsys_conn.execute("DROP TABLE TARGET_INFO_GPU")
     skill = get_skill("arithmetic_intensity")
     rows = skill.execute(
         minimal_nsys_conn,
