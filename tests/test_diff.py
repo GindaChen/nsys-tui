@@ -384,7 +384,7 @@ def test_diff_tools_phase_c_prompt_export():
 
 def test_hardware_get_peak_tflops():
     """hardware.get_peak_tflops: known GPU returns peak_tflops, unknown/empty returns error."""
-    from nsys_ai.hardware import GPU_PEAK_TFLOPS, get_peak_tflops
+    from nsys_ai.hardware import GPU_SPECS, get_peak_tflops
 
     # Known GPUs (substring match)
     r = get_peak_tflops("NVIDIA A100-SXM4-80GB")
@@ -409,11 +409,11 @@ def test_hardware_get_peak_tflops():
     r = get_peak_tflops("   ")
     assert "error" in r
 
-    # Sanity: all keys in GPU_PEAK_TFLOPS resolve
-    for key in GPU_PEAK_TFLOPS:
+    # Sanity: all keys in GPU_SPECS resolve
+    for key in GPU_SPECS:
         r = get_peak_tflops(f"NVIDIA {key}")
         assert "peak_tflops" in r, f"Key {key!r} should resolve"
-        assert r["peak_tflops"] == GPU_PEAK_TFLOPS[key]
+        assert r["peak_tflops"] == GPU_SPECS[key][0]
 
 
 def test_profile_get_first_gpu_name(tmp_path):
