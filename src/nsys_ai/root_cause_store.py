@@ -10,10 +10,13 @@ Each entry is a markdown file with YAML frontmatter.
 
 from __future__ import annotations
 
+import logging
 import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -204,7 +207,8 @@ def _load_dir_entries(directory: str | Path, source: str) -> list[RootCauseEntry
             text = f.read_text(encoding="utf-8")
             entry = parse_entry(text, source=source, file_path=str(f))
             entries.append(entry)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to load user root cause from {f}: {e}")
             continue
     return entries
 
