@@ -118,7 +118,7 @@ def _execute(conn, **kwargs):
             row = cursor.fetchone()
             if row is None:
                 break
-            
+
             s, e = row[0], row[1]
             if trim_start is not None:
                 s = max(s, trim_start)
