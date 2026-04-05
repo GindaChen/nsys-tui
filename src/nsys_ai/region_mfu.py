@@ -185,7 +185,8 @@ def find_nvtx_ranges(
         return []
 
     from .connection import wrap_connection
-    has_text_id = wrap_connection(conn).detect_nvtx_text_id()
+    adapter = wrap_connection(conn)
+    has_text_id = adapter.detect_nvtx_text_id()
     if match_mode not in ("contains", "exact"):
         match_mode = "contains"
 
@@ -221,8 +222,7 @@ def find_nvtx_ranges(
 
     base_sql += "ORDER BY start_ns"
 
-    from .connection import wrap_connection
-    cur = wrap_connection(conn).execute(base_sql, params)
+    cur = adapter.execute(base_sql, params)
     rows: list[RowDict] = []
     for text, start_ns, end_ns, global_tid in cur.fetchall():
         if text is None:

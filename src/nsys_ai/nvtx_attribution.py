@@ -84,6 +84,7 @@ def _sort_merge_attribute(
         FROM {nvtx_table} n
         {text_join}
         WHERE n.eventType = 59 AND n.[end] > n.start
+        ORDER BY n.globalTid, n.start
         """
     ).fetchall()
 

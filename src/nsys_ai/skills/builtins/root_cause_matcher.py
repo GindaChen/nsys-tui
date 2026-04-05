@@ -853,14 +853,23 @@ def _check_sync_memset(conn: sqlite3.Connection, **kwargs):
 
 def _safe_execute(skill_name, conn: sqlite3.Connection, **kwargs):
     """Execute a skill, returning [] on DB or skill execution errors."""
+    from ...exceptions import SkillExecutionError
     from ...skills.registry import get_skill
+
+    error_types = (sqlite3.Error, SkillExecutionError)
+    try:
+        import duckdb
+
+        error_types = error_types + (duckdb.Error,)
+    except ImportError:
+        pass
 
     try:
         skill = get_skill(skill_name)
         if skill is None:
             return []
         return skill.execute(conn, **kwargs)
-    except Exception as e:
+    except error_types as e:
         _log.debug("root_cause_matcher (%s): %s", skill_name, e, exc_info=True)
         return []
 

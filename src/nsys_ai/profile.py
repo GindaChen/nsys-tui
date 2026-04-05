@@ -638,9 +638,9 @@ class Profile:
         conn = self.db if self.db is not None else self.conn
 
         from .connection import DuckDBAdapter, wrap_connection
-        adapter = getattr(self, "adapter", None)
-        if adapter is None:
-            adapter = self.adapter = wrap_connection(conn)
+        # Always wrap the actual connection being used — self.adapter may
+        # reference self.conn (SQLite) while conn here is self.db (DuckDB).
+        adapter = wrap_connection(conn)
 
         is_duckdb = isinstance(adapter, DuckDBAdapter)
 

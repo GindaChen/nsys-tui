@@ -1,8 +1,13 @@
 import logging
+import re
 import sqlite3
 from typing import Any, Protocol, runtime_checkable
 
 _log = logging.getLogger(__name__)
+
+# Defence-in-depth: reject identifiers with special chars even though
+# callers should only pass schema-derived names.
+_SAFE_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 @runtime_checkable
@@ -59,6 +64,8 @@ class SQLiteAdapter:
             return False
 
     def get_table_columns(self, table_name: str) -> list[str]:
+        if not _SAFE_IDENT_RE.match(table_name):
+            raise ValueError(f"Unsafe table name: {table_name!r}")
         cur = self.conn.execute(f"PRAGMA table_info({table_name})")
         return [row[1] for row in cur.fetchall()]
 
@@ -106,6 +113,8 @@ class DuckDBAdapter:
             return False
 
     def get_table_columns(self, table_name: str) -> list[str]:
+        if not _SAFE_IDENT_RE.match(table_name):
+            raise ValueError(f"Unsafe table name: {table_name!r}")
         cur = self.conn.execute(f"DESCRIBE {table_name}")
         return [row[0] for row in cur.fetchall()]
 
