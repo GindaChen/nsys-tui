@@ -1,6 +1,8 @@
 """Detect Python Garbage Collection and intensive memory free stalls."""
 
-from ..base import Skill, _resolve_activity_tables
+from nsys_ai.connection import wrap_connection
+
+from ..base import Skill
 
 
 def _format(rows):
@@ -23,14 +25,15 @@ def _format(rows):
 
 
 def _execute(conn, **kwargs):
-    tables = _resolve_activity_tables(conn)
+    adapter = wrap_connection(conn)
+    tables = adapter.resolve_activity_tables()
     runtime_table = tables.get("runtime", "CUPTI_ACTIVITY_KIND_RUNTIME")
 
     trim_start = kwargs.get("trim_start_ns")
     trim_end = kwargs.get("trim_end_ns")
 
     try:
-        conn.execute(f"SELECT 1 FROM {runtime_table} LIMIT 1")
+        adapter.execute(f"SELECT 1 FROM {runtime_table} LIMIT 1")
     except Exception:
         return []
 
@@ -58,7 +61,7 @@ def _execute(conn, **kwargs):
         GROUP BY s.value
         ORDER BY total_ms DESC
     """
-    rows_runtime = conn.execute(sql_runtime, params_r).fetchall()
+    rows_runtime = adapter.execute(sql_runtime, params_r).fetchall()
     cols = ["event_name", "occurrences", "total_ms", "max_ms", "avg_ms"]
     results = [dict(zip(cols, r)) if isinstance(r, tuple) else dict(r) for r in rows_runtime]
 
@@ -74,14 +77,7 @@ def _execute(conn, **kwargs):
 
         # Handle both text and textId schemas
         try:
-            import duckdb as _ddb
-
-            if isinstance(conn, _ddb.DuckDBPyConnection):
-                nvtx_cols = [r[0] for r in conn.execute(f"DESCRIBE {nvtx_table}").fetchall()]
-            else:
-                nvtx_cols = [
-                    r[1] for r in conn.execute(f"PRAGMA table_info({nvtx_table})").fetchall()
-                ]
+            nvtx_cols = adapter.get_table_columns(nvtx_table)
         except Exception:
             nvtx_cols = []
 
@@ -118,7 +114,7 @@ def _execute(conn, **kwargs):
                 GROUP BY text
             """
         try:
-            rows_nvtx = conn.execute(sql_nvtx, params_n).fetchall()
+            rows_nvtx = adapter.execute(sql_nvtx, params_n).fetchall()
             results.extend(
                 dict(zip(cols, r)) if isinstance(r, tuple) else dict(r) for r in rows_nvtx
             )

@@ -1,6 +1,8 @@
 """Detect JIT compilation and module loading stalls."""
 
-from ..base import Skill, _resolve_activity_tables
+from nsys_ai.connection import wrap_connection
+
+from ..base import Skill
 
 
 def _format(rows):
@@ -23,7 +25,7 @@ def _format(rows):
 
 
 def _execute(conn, **kwargs):
-    tables = _resolve_activity_tables(conn)
+    tables = wrap_connection(conn).resolve_activity_tables()
     runtime_table = tables.get("runtime", "CUPTI_ACTIVITY_KIND_RUNTIME")
 
     trim_start = kwargs.get("trim_start_ns")

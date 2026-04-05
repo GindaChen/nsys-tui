@@ -76,9 +76,9 @@ def _execute(conn, **kwargs):
         return [dict(zip(cols, r)) for r in rows]
     else:
         # Pure SQLite fallback (lacks TC eligibility analysis)
-        from nsys_ai.skills.base import _resolve_activity_tables
+        from nsys_ai.connection import wrap_connection
 
-        tables = _resolve_activity_tables(conn)
+        tables = wrap_connection(conn).resolve_activity_tables()
         kernel_table = tables.get("kernel", "CUPTI_ACTIVITY_KIND_KERNEL")
 
         trim_clause = ""
