@@ -181,10 +181,16 @@ def _parse_book_md(book_path: str | Path) -> list[RootCauseEntry]:
     h2_pattern = re.compile(r"^## \d+\.\s+(.+)$", re.MULTILINE)
     parts = h2_pattern.split(text)
 
+    entry_end_pattern = re.compile(r"(?m)^(---|## Contributing\b.*)$")
+
     # parts = [preamble, title1, content1, title2, content2, ...]
     for i in range(1, len(parts) - 1, 2):
         title = parts[i].strip()
         content = parts[i + 1].strip()
+        
+        entry_end_match = entry_end_pattern.search(content)
+        if entry_end_match:
+            content = content[:entry_end_match.start()].rstrip()
 
         # Extract sub-sections using bold markers within this entry
         sub_sections: dict[str, str] = {}
