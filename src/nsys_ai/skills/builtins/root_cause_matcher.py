@@ -22,6 +22,15 @@ from ..base import Skill, SkillParam
 
 _log = logging.getLogger(__name__)
 
+# Narrow exception tuple for diagnostic query blocks.
+# Catches only expected DB errors so programming bugs propagate.
+_DB_ERRORS: tuple[type[Exception], ...] = (sqlite3.Error, sqlite3.OperationalError)
+try:
+    import duckdb  # noqa: E402
+    _DB_ERRORS = _DB_ERRORS + (duckdb.Error,)
+except ImportError:
+    pass
+
 
 def _execute(conn: sqlite3.Connection, **kwargs):
     """Run all pattern matchers against the profile."""
@@ -372,7 +381,7 @@ def _diagnose_low_overlap(conn: sqlite3.Connection, **kwargs) -> dict:
                 "cause": "same_stream",
                 "detail": (f"Stream(s) [{', '.join(streams)}] run both NCCL and compute kernels"),
             }
-    except Exception as e:
+    except _DB_ERRORS as e:
         _log.debug("_diagnose_low_overlap (same_stream): %s", e, exc_info=True)
 
     # --- Check 2: Sync-after-NCCL detection ---
@@ -417,7 +426,7 @@ def _diagnose_low_overlap(conn: sqlite3.Connection, **kwargs) -> dict:
                             "detected immediately after NCCL kernel completion"
                         ),
                     }
-        except Exception as e:
+        except _DB_ERRORS as e:
             _log.debug("_diagnose_low_overlap (sync_after_nccl): %s", e, exc_info=True)
 
     return {"cause": "general", "detail": ""}
@@ -654,7 +663,7 @@ def _check_sync_apis(conn: sqlite3.Connection, **kwargs):
                     ),
                 }
             ]
-    except Exception as e:
+    except _DB_ERRORS as e:
         _log.debug("root_cause_matcher (_check_sync_apis): %s", e, exc_info=True)
     return []
 
@@ -723,7 +732,7 @@ def _check_sync_memcpy(conn: sqlite3.Connection, **kwargs):
                 ),
             }
         ]
-    except Exception as e:
+    except _DB_ERRORS as e:
         _log.debug("root_cause_matcher (_check_sync_memcpy): %s", e, exc_info=True)
     return []
 
@@ -777,7 +786,7 @@ def _check_pageable_memcpy(conn: sqlite3.Connection, **kwargs):
                 ),
             }
         ]
-    except Exception as e:
+    except _DB_ERRORS as e:
         _log.debug("root_cause_matcher (_check_pageable_memcpy): %s", e, exc_info=True)
     return []
 
@@ -843,7 +852,7 @@ def _check_sync_memset(conn: sqlite3.Connection, **kwargs):
                 ),
             }
         ]
-    except Exception as e:
+    except _DB_ERRORS as e:
         _log.debug("root_cause_matcher (_check_sync_memset): %s", e, exc_info=True)
     return []
 
@@ -856,20 +865,14 @@ def _safe_execute(skill_name, conn: sqlite3.Connection, **kwargs):
     from ...exceptions import SkillExecutionError
     from ...skills.registry import get_skill
 
-    error_types = (sqlite3.Error, SkillExecutionError)
-    try:
-        import duckdb
-
-        error_types = error_types + (duckdb.Error,)
-    except ImportError:
-        pass
+    _safe_errors = _DB_ERRORS + (SkillExecutionError,)
 
     try:
         skill = get_skill(skill_name)
         if skill is None:
             return []
         return skill.execute(conn, **kwargs)
-    except error_types as e:
+    except _safe_errors as e:
         _log.debug("root_cause_matcher (%s): %s", skill_name, e, exc_info=True)
         return []
 
