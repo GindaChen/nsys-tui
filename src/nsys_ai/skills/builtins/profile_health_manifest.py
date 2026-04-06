@@ -40,6 +40,7 @@ def _execute(conn, **kwargs):
     from ...profile import Profile
 
     device = int(kwargs.get("device", 0))
+    overhead_ns = kwargs.get("overhead_ns", 0)
 
     # Forward trim kwargs if present
     trim_kwargs = {}
@@ -79,6 +80,15 @@ def _execute(conn, **kwargs):
         effective_end_ns - effective_start_ns if effective_end_ns > effective_start_ns else 0
     )
     profile_span_ms = round(profile_span_ns / 1e6, 1) if profile_span_ns > 0 else 0
+
+    overhead_ms = round(overhead_ns / 1e6, 1)
+    overhead_pct_raw = (overhead_ns / profile_span_ns * 100) if profile_span_ns > 0 else 0
+    overhead_pct = round(overhead_pct_raw, 1)
+    data_quality = {
+        "profiler_overhead_ms": overhead_ms,
+        "overhead_pct": overhead_pct,
+        "overhead_pct_raw": overhead_pct_raw,
+    }
 
     # ── 2. Top kernels (compact: top 5 only) ─────────────────────
     trim_tuple = None
@@ -182,6 +192,7 @@ def _execute(conn, **kwargs):
         "idle": idle_summary,
         "root_cause_count": len(root_causes),
         "root_causes": root_causes[:5],  # Cap at 5 to keep output compact
+        "data_quality": data_quality,
     }
 
     # Infer suspected bottleneck
@@ -194,6 +205,11 @@ def _execute(conn, **kwargs):
 
 def _infer_bottleneck(m: dict) -> str:
     """Heuristic bottleneck inference from manifest data."""
+    dq = m.get("data_quality", {})
+    overhead_pct_val = dq.get("overhead_pct_raw", dq.get("overhead_pct", 0))
+    if overhead_pct_val > 1.0:
+        return f"Profiler Overhead ({dq.get('overhead_pct', overhead_pct_val)}%) contaminated the profile"
+
     overlap = m.get("overlap", {})
     idle = m.get("idle", {})
     nccl = m.get("nccl", {})
@@ -228,6 +244,11 @@ def _format(rows):
     lines = ["══ Profile Health Manifest ══"]
     lines.append(f"  GPU:          {m.get('gpu', '?')}")
     lines.append(f"  Profile span: {m.get('profile_span_ms', 0):.1f}ms")
+
+    dq = m.get("data_quality", {})
+    overhead_pct_raw = dq.get("overhead_pct_raw", dq.get("overhead_pct", 0))
+    if overhead_pct_raw >= 0.1:
+        lines.append(f"  ⚠️ Profiler Overhead: {dq.get('profiler_overhead_ms', 0):.1f}ms ({dq.get('overhead_pct', overhead_pct_raw)}% of span)")
 
     # Top kernels
     lines.append("")
@@ -295,6 +316,8 @@ SKILL = Skill(
         "One-shot profile health summary for AI agents. Returns a compact JSON manifest "
         "covering GPU info, top kernels, compute/NCCL overlap and NCCL summary, "
         "idle gaps, and root cause findings — all in a single call. "
+        "If Profiler Overhead is >1%, advise the user to use torch.cuda.profiler.start/stop() "
+        "and --capture-range=cudaProfilerApi instead of full-script profiling. "
         "Use this as the FIRST skill to call on any new profile."
     ),
     category="utility",

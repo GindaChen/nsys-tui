@@ -17,6 +17,8 @@ nsys-ai skill run profile_health_manifest profile.sqlite --format json
 ```
 This returns GPU info, top 5 kernels, compute/NCCL overlap, an NCCL summary (streams, counts, dominant type), idle gaps, root cause findings, and `suspected_bottleneck` — all in a single call. Use `suspected_bottleneck` to decide which stage to drill into next. Use `--max-rows N` on any subsequent skill call to control JSON output size.
 
+> **Note on Profiler Overhead**: If the manifest reports high **Profiler Overhead** (>1%), this is Nsight Systems instrumentation latency. The two biggest contributors are `CUDA profiling initialization` (up to ~1s when CUPTI attaches to PyTorch streams) and `CUDA profiling data flush` (~300ms when dumping buffers to disk on exit). Because this overhead is heavily concentrated at the start and end of a script, running `nsys profile python train.py` from start-to-finish severely skews short profiles. **Recommendation**: Tell the user to use `torch.cuda.profiler.start/stop()` inside the training loop and profile with `nsys profile --capture-range=cudaProfilerApi` to exclude cold-start/teardown overhead.
+
 ### Stage 1: Orient — Establish the Workload Context
 **Goal**: Determine the basic context to avoid blindly guessing.
 **Actions**:

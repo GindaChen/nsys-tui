@@ -9,7 +9,28 @@ import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from ..connection import DB_ERRORS
+
 _log = logging.getLogger(__name__)
+
+
+def _compute_interval_union(intervals: list[tuple[int, int]]) -> int:
+    """Computes the total non-overlapping duration of a list of [start, end] intervals."""
+    if not intervals:
+        return 0
+    sorted_intervals = sorted(intervals, key=lambda x: x[0])
+    total_ns = 0
+    current_start, current_end = sorted_intervals[0]
+
+    for start, end in sorted_intervals[1:]:
+        if start <= current_end:
+            current_end = max(current_end, end)
+        else:
+            total_ns += current_end - current_start
+            current_start, current_end = start, end
+
+    total_ns += current_end - current_start
+    return total_ns
 
 # Track connections that have already been indexed to avoid repeated work.
 _indexed_connections: set[int] = set()
@@ -104,12 +125,7 @@ class Skill:
             elif p.required:
                 raise ValueError(f"Skill '{self.name}' requires parameter '{p.name}'")
 
-        # Python-level skill: delegate to execute_fn with resolved params.
-        if self.execute_fn is not None:
-            return self.execute_fn(conn, **resolved)
-
-        # SQL skill: further augment resolved params and run query
-        # Handle {trim_clause} injection
+        # Handle {trim_clause} injection before execute_fn so {overhead_ns} can be computed correctly
         trim_start = resolved.get("trim_start_ns")
         trim_end = resolved.get("trim_end_ns")
         if trim_start is not None and trim_end is not None and "{trim_clause}" in self.sql:
@@ -120,6 +136,54 @@ class Skill:
             # No trim requested — replace with empty string
             resolved["trim_clause"] = ""
 
+
+
+        # Compute profiler overhead union duration dynamically.
+        # Probe the known profiler overhead table-name variants directly and
+        # treat DB_ERRORS as "table not present" so we can fall back cleanly.
+        if "overhead_ns" not in resolved:
+            overhead_ns = 0
+            for oh_table in ("profiler_overhead", "PROFILER_OVERHEAD"):
+                try:
+                    conds = []
+                    params: list[object] = []
+                    if trim_start is not None:
+                        conds.append("[end] >= ?")
+                        params.append(int(trim_start))
+                    if trim_end is not None:
+                        conds.append("start <= ?")
+                        params.append(int(trim_end))
+
+                    where_clause = "WHERE " + " AND ".join(conds) if conds else ""
+                    cur = adapter.execute(
+                        f"SELECT start, [end] FROM {oh_table} {where_clause}",
+                        params,
+                    )
+                    rows = cur.fetchall()
+                    if rows:
+                        intervals = []
+                        for row in rows:
+                            s, e = int(row[0]), int(row[1])
+                            if trim_start is not None:
+                                s = max(s, int(trim_start))
+                            if trim_end is not None:
+                                e = min(e, int(trim_end))
+                            if s < e:
+                                intervals.append((s, e))
+                        overhead_ns = _compute_interval_union(intervals)
+                    break  # Table found and queried successfully
+                except DB_ERRORS:
+                    continue  # Table doesn't exist under this name, try next
+            if overhead_ns == 0:
+                _log.debug("No profiler overhead data found (table absent or empty)")
+
+            resolved["overhead_ns"] = overhead_ns
+
+        # Python-level skill: delegate to execute_fn with resolved params.
+        if self.execute_fn is not None:
+            return self.execute_fn(conn, **resolved)
+
+        # --- SQL Execution Path ---
         # Inject resolved activity table names for versioned-table support.
         # SQL templates use {kernel_table} etc. instead of hardcoding
         # CUPTI_ACTIVITY_KIND_KERNEL which may be _KERNEL_V2/_V3 in

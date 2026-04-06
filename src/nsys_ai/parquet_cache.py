@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 
 # Bump this when the cache schema changes (e.g., new columns, new tables).
 _CACHE_VERSION = (
-    4  # bumped: kernels.parquet now includes is_tc_eligible, uses_tc, name, demangled columns
+    5  # bumped: added profiler_overhead to _BASE_TABLES
 )
 
 # Tables to export as-is from SQLite → Parquet.
@@ -42,6 +42,7 @@ _BASE_TABLES = [
     ("memcpy", "CUPTI_ACTIVITY_KIND_MEMCPY"),
     ("memset", "CUPTI_ACTIVITY_KIND_MEMSET"),
     ("overhead", "CUPTI_ACTIVITY_KIND_OVERHEAD"),
+    ("profiler_overhead", "PROFILER_OVERHEAD"),
     ("composite_events", "COMPOSITE_EVENTS"),
     ("string_ids", "StringIds"),
     ("gpu_info", "TARGET_INFO_GPU"),
