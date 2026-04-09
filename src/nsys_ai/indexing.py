@@ -29,9 +29,6 @@ def _quote_identifier(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
-
-
-
 def ensure_performance_indexes(conn: sqlite3.Connection) -> None:
     """Create all performance indexes needed by skills, MFU, and evidence analysis.
 
@@ -43,6 +40,7 @@ def ensure_performance_indexes(conn: sqlite3.Connection) -> None:
     """
     # DuckDB connections (Parquet cache) don't need SQLite indexes.
     from .connection import DuckDBAdapter, wrap_connection
+
     adapter = wrap_connection(conn)
     if isinstance(adapter, DuckDBAdapter):
         return

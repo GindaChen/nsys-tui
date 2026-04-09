@@ -190,7 +190,7 @@ def _parse_book_md(book_path: str | Path) -> list[RootCauseEntry]:
 
         entry_end_match = entry_end_pattern.search(content)
         if entry_end_match:
-            content = content[:entry_end_match.start()].rstrip()
+            content = content[: entry_end_match.start()].rstrip()
 
         # Extract sub-sections using bold markers within this entry
         sub_sections: dict[str, str] = {}

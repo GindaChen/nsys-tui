@@ -5,6 +5,7 @@ Provides a thin wrapper around the SQLite export with typed accessors
 for kernels, NVTX events, CUDA runtime calls, and metadata.
 """
 
+import functools
 import logging
 import os
 import re
@@ -12,7 +13,11 @@ import shutil
 import sqlite3
 import subprocess  # nosec B404 — only for nsys export .nsys-rep→.sqlite, list args no shell
 import threading
+import typing
 from dataclasses import dataclass, field
+
+if typing.TYPE_CHECKING:
+    from .fingerprint import ProfileFingerprint
 
 import duckdb
 
@@ -51,6 +56,7 @@ class NsightSchema:
     def __init__(self, conn: sqlite3.Connection):
         self._conn = conn
         from .connection import wrap_connection
+
         self._adapter = wrap_connection(conn)
 
         self.tables = list(self._adapter.get_table_names())
@@ -184,6 +190,7 @@ class Profile:
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         from .connection import wrap_connection
+
         self.adapter = wrap_connection(self.conn)
         self.schema = NsightSchema(self.conn)
         self.meta = self._discover()
@@ -228,6 +235,7 @@ class Profile:
         Supports both SQLite and DuckDB connections.
         """
         from .connection import DuckDBAdapter, wrap_connection
+
         adapter = wrap_connection(conn)
         is_duckdb = isinstance(adapter, DuckDBAdapter)
         if not is_duckdb:
@@ -243,8 +251,6 @@ class Profile:
         obj.meta = obj._discover()
         obj._nvtx_has_text_id = obj.adapter.detect_nvtx_text_id()
         return obj
-
-
 
     def _discover(self) -> ProfileMeta:
         tables = self.schema.tables
@@ -334,6 +340,12 @@ class Profile:
                 streams=streams.get(dev, []),
             )
         return info
+
+    @functools.cached_property
+    def fingerprint(self) -> "ProfileFingerprint":  # type: ignore[name-defined]
+        from .fingerprint import get_fingerprint
+
+        return get_fingerprint(self.conn)
 
     def kernels(self, device: int | None, trim: tuple[int, int] | None = None) -> list[dict]:
         """All kernels on a device (or all devices if None), optionally trimmed to a time window."""
@@ -636,6 +648,7 @@ class Profile:
         conn = self.db if self.db is not None else self.conn
 
         from .connection import DuckDBAdapter, wrap_connection
+
         # Always wrap the actual connection being used — self.adapter may
         # reference self.conn (SQLite) while conn here is self.db (DuckDB).
         adapter = wrap_connection(conn)
@@ -643,7 +656,9 @@ class Profile:
         is_duckdb = isinstance(adapter, DuckDBAdapter)
 
         if not is_duckdb and not getattr(self, "_warned_sqlite_fallback", False):
-            self._log.warning("DuckDB cache unavailable or not in use; falling back to SQLite (slower)")
+            self._log.warning(
+                "DuckDB cache unavailable or not in use; falling back to SQLite (slower)"
+            )
             self._warned_sqlite_fallback = True
 
         with self._lock:
@@ -743,6 +758,7 @@ def get_first_gpu_name(conn) -> str:
     Accepts both sqlite3.Connection and duckdb.DuckDBPyConnection.
     """
     from .connection import wrap_connection
+
     adapter = wrap_connection(conn)
     tables = adapter.get_table_names()
     if "TARGET_INFO_GPU" not in tables and "gpu_info" not in tables:

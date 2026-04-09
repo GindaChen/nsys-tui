@@ -425,6 +425,7 @@ pip install nsys-ai[ai]
 - **Auto-commentary** on kernel distributions and performance patterns
 - **NVTX annotation suggestions** for un-annotated code regions
 - **Performance bottleneck detection** with actionable recommendations
+- **Framework Fingerprinting** statically identifies distributed stacks (vLLM, Megatron-LM, DeepSpeed) and cluster networking hardware (Mellanox, Broadcom) to context-align AI recommendations.
 
 ---
 

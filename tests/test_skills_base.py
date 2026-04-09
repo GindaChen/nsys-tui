@@ -35,7 +35,7 @@ def test_profiler_overhead_probing_and_trimming():
         title="Dummy",
         description="Dummy description",
         category="utility",
-        execute_fn=lambda conn, **kwargs: [kwargs]
+        execute_fn=lambda conn, **kwargs: [kwargs],
     )
     res_no_table = dummy_skill.execute(conn)
     assert res_no_table[0]["overhead_ns"] == 0

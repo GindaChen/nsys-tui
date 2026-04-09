@@ -70,7 +70,11 @@ def _execute(conn, **kwargs):
 
     # If peak_tflops is missing, fail explicitly.
     if peak_tflops is None:
-        return [{"error": f"GPU {gpu_name} ({chip_name}) not found in hardware specs. Cannot compute roofline. Please explicitly provide 'peak_tflops' and optionally 'hbm_bw_gbps'."}]
+        return [
+            {
+                "error": f"GPU {gpu_name} ({chip_name}) not found in hardware specs. Cannot compute roofline. Please explicitly provide 'peak_tflops' and optionally 'hbm_bw_gbps'."
+            }
+        ]
 
     if hbm_bw_gbps is None:
         # Cannot determine HBM bandwidth — skip roofline classification,
@@ -79,7 +83,8 @@ def _execute(conn, **kwargs):
             "HBM bandwidth not detected for %s (%s); "
             "roofline classification unavailable. "
             "Provide 'hbm_bw_gbps' explicitly for full analysis.",
-            gpu_name, chip_name,
+            gpu_name,
+            chip_name,
         )
         hbm_bw_gbps = 0.0
 
@@ -135,12 +140,12 @@ def _execute(conn, **kwargs):
             elif s <= current_end:
                 current_end = max(current_end, e)
             else:
-                total_kernel_ns += (current_end - current_start)
+                total_kernel_ns += current_end - current_start
                 current_start = s
                 current_end = e
 
         if current_start != -1:
-            total_kernel_ns += (current_end - current_start)
+            total_kernel_ns += current_end - current_start
 
     except _DB_ERRORS as e:
         logger.debug(f"Failed to fetch kernel intervals: {e}")

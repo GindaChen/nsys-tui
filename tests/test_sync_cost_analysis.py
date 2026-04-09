@@ -31,7 +31,9 @@ def test_sync_analysis_without_tables(sync_skill):
 def test_sync_analysis_math(sync_skill):
     conn = sqlite3.connect(":memory:")
 
-    conn.execute("CREATE TABLE CUPTI_ACTIVITY_KIND_SYNCHRONIZATION (start INTEGER, [end] INTEGER, globalPid INTEGER, syncType INTEGER)")
+    conn.execute(
+        "CREATE TABLE CUPTI_ACTIVITY_KIND_SYNCHRONIZATION (start INTEGER, [end] INTEGER, globalPid INTEGER, syncType INTEGER)"
+    )
     conn.execute("CREATE TABLE ENUM_CUPTI_SYNC_TYPE (id INTEGER, name TEXT)")
 
     conn.execute("INSERT INTO ENUM_CUPTI_SYNC_TYPE VALUES (1, 'Event sync'), (2, 'Stream sync')")
@@ -39,9 +41,15 @@ def test_sync_analysis_math(sync_skill):
     # Thread 1 does Event Sync 100-200 ms
     # Thread 2 does Event Sync 150-300 ms (Overlap union logic should yield 100-300 = 200ms)
     # Thread 1 does Stream Sync 500-600 ms
-    conn.execute("INSERT INTO CUPTI_ACTIVITY_KIND_SYNCHRONIZATION VALUES (100000000, 200000000, 1, 1)")
-    conn.execute("INSERT INTO CUPTI_ACTIVITY_KIND_SYNCHRONIZATION VALUES (150000000, 300000000, 2, 1)")
-    conn.execute("INSERT INTO CUPTI_ACTIVITY_KIND_SYNCHRONIZATION VALUES (500000000, 600000000, 1, 2)")
+    conn.execute(
+        "INSERT INTO CUPTI_ACTIVITY_KIND_SYNCHRONIZATION VALUES (100000000, 200000000, 1, 1)"
+    )
+    conn.execute(
+        "INSERT INTO CUPTI_ACTIVITY_KIND_SYNCHRONIZATION VALUES (150000000, 300000000, 2, 1)"
+    )
+    conn.execute(
+        "INSERT INTO CUPTI_ACTIVITY_KIND_SYNCHRONIZATION VALUES (500000000, 600000000, 1, 2)"
+    )
 
     rows = sync_skill.execute(conn)
     assert len(rows) == 1
@@ -59,12 +67,16 @@ def test_sync_analysis_math(sync_skill):
 def test_sync_analysis_trimming(sync_skill):
     conn = sqlite3.connect(":memory:")
 
-    conn.execute("CREATE TABLE CUPTI_ACTIVITY_KIND_SYNCHRONIZATION (start INTEGER, [end] INTEGER, globalPid INTEGER, syncType INTEGER)")
+    conn.execute(
+        "CREATE TABLE CUPTI_ACTIVITY_KIND_SYNCHRONIZATION (start INTEGER, [end] INTEGER, globalPid INTEGER, syncType INTEGER)"
+    )
     conn.execute("CREATE TABLE ENUM_CUPTI_SYNC_TYPE (id INTEGER, name TEXT)")
     conn.execute("INSERT INTO ENUM_CUPTI_SYNC_TYPE VALUES (1, 'Event sync')")
 
     # [100, 300] ms event
-    conn.execute("INSERT INTO CUPTI_ACTIVITY_KIND_SYNCHRONIZATION VALUES (100000000, 300000000, 1, 1)")
+    conn.execute(
+        "INSERT INTO CUPTI_ACTIVITY_KIND_SYNCHRONIZATION VALUES (100000000, 300000000, 1, 1)"
+    )
 
     # Trim to [200, 400] ms
     # Expectation: start is clamped to 200, end remains 300 -> 100ms duration
