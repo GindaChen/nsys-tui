@@ -186,6 +186,8 @@ class Profile:
         from .connection import wrap_connection
         self.adapter = wrap_connection(self.conn)
         self.schema = NsightSchema(self.conn)
+        from .fingerprint import get_fingerprint
+        self.fingerprint = get_fingerprint(self.conn)
         self.meta = self._discover()
         self._nvtx_has_text_id: bool = self.adapter.detect_nvtx_text_id()
 
@@ -240,6 +242,8 @@ class Profile:
         obj.db = conn if is_duckdb else None  # type: ignore[assignment]
         obj.adapter = adapter
         obj.schema = NsightSchema(conn)
+        from .fingerprint import get_fingerprint
+        obj.fingerprint = get_fingerprint(conn)
         obj.meta = obj._discover()
         obj._nvtx_has_text_id = obj.adapter.detect_nvtx_text_id()
         return obj

@@ -193,6 +193,7 @@ def _execute(conn, **kwargs):
     # ── Assemble manifest ────────────────────────────────────────
     manifest = {
         "gpu": gpu_name,
+        "fingerprint": prof.fingerprint.__dict__ if prof.fingerprint else None,
         "profile_span_ms": profile_span_ms,
         "top_kernels": top_kernels,
         "total_kernel_ms": round(total_kernel_ms, 1),
@@ -258,6 +259,13 @@ def _format(rows):
         return "(No manifest data)"
     m = rows[0]
     lines = ["══ Profile Health Manifest ══"]
+
+    fp = m.get("fingerprint")
+    if fp:
+        dist_str = "Distributed: yes" if fp.get("distributed") else "Distributed: no"
+        mn_str = "Multi-node: yes" if fp.get("multi_node") else "Multi-node: no"
+        lines.append(f"  Framework:    {fp.get('framework', 'Unknown')} ({dist_str}, {mn_str})")
+
     lines.append(f"  GPU:          {m.get('gpu', '?')}")
     lines.append(f"  Profile span: {m.get('profile_span_ms', 0):.1f}ms")
 

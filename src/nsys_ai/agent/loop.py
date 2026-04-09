@@ -367,7 +367,16 @@ class Agent:
                 try:
                     from .persona import build_system_prompt
 
-                    system = build_system_prompt()
+                    system_str = build_system_prompt()
+                    fp_str = ""
+                    if getattr(self, "profile", None) and getattr(self.profile, "fingerprint", None):
+                        fp_str = self.profile.fingerprint.to_prompt_string()
+
+                    system = (
+                        f"{system_str}\n\n"
+                        f"--- TRACE CONTEXT ---\n{fp_str}\n---------------------\n"
+                        "Apply framework-specific knowledge when diagnosing bottlenecks."
+                    ) if fp_str else system_str
                 except Exception:
                     log.debug("Failed to load persona prompt", exc_info=True)
                     system = "You are an expert GPU profiling assistant."
@@ -400,11 +409,22 @@ class Agent:
         try:
             from .persona import build_system_prompt
 
+            system_str = build_system_prompt()
+            fp_str = ""
+            if getattr(self, "profile", None) and getattr(self.profile, "fingerprint", None):
+                fp_str = self.profile.fingerprint.to_prompt_string()
+
+            system = (
+                f"{system_str}\n\n"
+                f"--- TRACE CONTEXT ---\n{fp_str}\n---------------------\n"
+                "Apply framework-specific knowledge when diagnosing bottlenecks."
+            ) if fp_str else system_str
+
             client = anthropic.Anthropic(api_key=api_key)
             message = client.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=2048,
-                system=build_system_prompt(),
+                system=system,
                 messages=[{"role": "user", "content": user_msg}],
             )
             return message.content[0].text
