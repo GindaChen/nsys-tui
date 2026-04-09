@@ -5,6 +5,7 @@ Provides a thin wrapper around the SQLite export with typed accessors
 for kernels, NVTX events, CUDA runtime calls, and metadata.
 """
 
+import functools
 import logging
 import os
 import re
@@ -12,7 +13,11 @@ import shutil
 import sqlite3
 import subprocess  # nosec B404 — only for nsys export .nsys-rep→.sqlite, list args no shell
 import threading
+import typing
 from dataclasses import dataclass, field
+
+if typing.TYPE_CHECKING:
+    from .fingerprint import ProfileFingerprint
 
 import duckdb
 
@@ -335,6 +340,12 @@ class Profile:
                 streams=streams.get(dev, []),
             )
         return info
+
+    @functools.cached_property
+    def fingerprint(self) -> "ProfileFingerprint":  # type: ignore[name-defined]
+        from .fingerprint import get_fingerprint
+
+        return get_fingerprint(self.conn)
 
     def kernels(self, device: int | None, trim: tuple[int, int] | None = None) -> list[dict]:
         """All kernels on a device (or all devices if None), optionally trimmed to a time window."""
