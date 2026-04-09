@@ -10,6 +10,7 @@ from ..base import Skill, SkillParam
 def _execute(conn: Any, *, limit: int = 10, **_kwargs):
     """Check for COMPOSITE_EVENTS table before querying."""
     from nsys_ai.connection import wrap_connection
+
     adapter = wrap_connection(conn)
 
     tables = adapter.get_table_names()

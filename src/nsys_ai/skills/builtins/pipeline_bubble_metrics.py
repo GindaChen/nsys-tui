@@ -41,7 +41,9 @@ def _format(rows):
         )
     if global_sync_ms > 0:
         lines.append("-" * 61)
-        lines.append(f"  ⚡ Global CPU Sync Stall: {global_sync_ms:.1f}ms (Host-blocking limits GPU feeding)")
+        lines.append(
+            f"  ⚡ Global CPU Sync Stall: {global_sync_ms:.1f}ms (Host-blocking limits GPU feeding)"
+        )
     return "\n".join(lines)
 
 
@@ -57,6 +59,7 @@ def _execute(conn, **kwargs):
     if trim_start is None or trim_end is None:
         try:
             from ...profile import Profile
+
             prof = Profile._from_conn(conn)
             p_start, p_end = prof.meta.time_range
             trim_start = trim_start if trim_start is not None else p_start
@@ -161,6 +164,7 @@ def _execute(conn, **kwargs):
     if results:
         try:
             from ...skills.registry import get_skill
+
             sync_skill = get_skill("sync_cost_analysis")
             if sync_skill:
                 sync_data = sync_skill.execute(conn, **kwargs)

@@ -44,8 +44,6 @@ ErrorDict = dict[str, Any]
 RowDict = dict[str, Any]
 
 
-
-
 def _escape_like(value: str) -> str:
     """Escape SQL LIKE wildcards so ``%`` and ``_`` are treated literally."""
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -165,9 +163,6 @@ def compute_theoretical_flops(
     }
 
 
-
-
-
 def find_nvtx_ranges(
     conn: sqlite3.Connection,
     nvtx_name: str,
@@ -185,6 +180,7 @@ def find_nvtx_ranges(
         return []
 
     from .connection import wrap_connection
+
     adapter = wrap_connection(conn)
     has_text_id = adapter.detect_nvtx_text_id()
     if match_mode not in ("contains", "exact"):
@@ -261,6 +257,7 @@ def _resolve_string_ids(
         params = [f"%{_escape_like(pattern)}%"]
 
     from .connection import wrap_connection
+
     cur = wrap_connection(conn).execute(sql, params)
     return {int(row[0]): str(row[1]) for row in cur.fetchall()}
 
@@ -326,6 +323,7 @@ def find_kernels_by_name(
     )
 
     from .connection import wrap_connection
+
     cur = wrap_connection(conn).execute(sql, params)
     kernels: list[RowDict] = []
     for short_id, start_ns, end_ns, duration_ns, dev, stream_id in cur.fetchall():
@@ -412,6 +410,7 @@ def get_region_kernels(
     )
 
     from .connection import wrap_connection
+
     cur = wrap_connection(conn).execute(sql, params)
     kernels: list[RowDict] = []
     for row in cur.fetchall():

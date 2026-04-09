@@ -32,10 +32,9 @@ def _resolve_active_device(conn, kwargs: dict) -> dict:
     """
     try:
         from ...connection import wrap_connection
+
         adapter = wrap_connection(conn)
-        kernel_table = adapter.resolve_activity_tables().get(
-            "kernel", "CUPTI_ACTIVITY_KIND_KERNEL"
-        )
+        kernel_table = adapter.resolve_activity_tables().get("kernel", "CUPTI_ACTIVITY_KIND_KERNEL")
 
         current_device = kwargs.get("device", 0)
 
@@ -466,7 +465,7 @@ def _diagnose_low_overlap(conn: sqlite3.Connection, **kwargs) -> dict:
                 # after ANY NCCL kernel's end time (avoids N+1 loop).
                 adapter = wrap_connection(conn)
                 found = adapter.execute(
-                        f"""
+                    f"""
                     SELECT 1 FROM {kernel_tbl} k
                     JOIN StringIds s ON k.shortName = s.id
                     WHERE (s.value LIKE '%nccl%' OR s.value LIKE '%NCCL%')
@@ -701,9 +700,7 @@ def _check_sync_apis(conn: sqlite3.Connection, **kwargs):
         # Total GPU kernel time as baseline for percentage threshold
         total_gpu_ns = 0
         if kernel_tbl:
-            gpu_row = adapter.execute(
-                f"SELECT SUM([end] - start) FROM {kernel_tbl}"
-            ).fetchone()
+            gpu_row = adapter.execute(f"SELECT SUM([end] - start) FROM {kernel_tbl}").fetchone()
             total_gpu_ns = gpu_row[0] or 0 if gpu_row else 0
 
         # Percentage-based threshold: sync time > 2% of total GPU time

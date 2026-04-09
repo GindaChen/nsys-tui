@@ -32,6 +32,7 @@ def _compute_interval_union(intervals: list[tuple[int, int]]) -> int:
     total_ns += current_end - current_start
     return total_ns
 
+
 # Track connections that have already been indexed to avoid repeated work.
 _indexed_connections: set[int] = set()
 
@@ -111,6 +112,7 @@ class Skill:
         ensure_indexes(conn)
 
         from ..connection import wrap_connection
+
         adapter = wrap_connection(conn)
 
         # Apply parameter defaults and required checks for all skill types.
@@ -135,8 +137,6 @@ class Skill:
         elif "{trim_clause}" in self.sql:
             # No trim requested — replace with empty string
             resolved["trim_clause"] = ""
-
-
 
         # Compute profiler overhead union duration dynamically.
         # Probe the known profiler overhead table-name variants directly and

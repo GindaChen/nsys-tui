@@ -31,9 +31,7 @@ import duckdb
 log = logging.getLogger(__name__)
 
 # Bump this when the cache schema changes (e.g., new columns, new tables).
-_CACHE_VERSION = (
-    6  # bumped: added CUPTI_ACTIVITY_KIND_SYNCHRONIZATION and ENUM_CUPTI_SYNC_TYPE
-)
+_CACHE_VERSION = 6  # bumped: added CUPTI_ACTIVITY_KIND_SYNCHRONIZATION and ENUM_CUPTI_SYNC_TYPE
 
 # Tables to export as-is from SQLite → Parquet.
 # (view_name, source_table_name)
@@ -177,7 +175,7 @@ _TABLE_PROJECTIONS: dict[str, str] = {
     "CUPTI_ACTIVITY_KIND_SYNCHRONIZATION": 'start, "end", globalPid, syncType',
     "CUPTI_ACTIVITY_KIND_SYNCHRONIZATION_V2": 'start, "end", globalPid, syncType',
     "CUPTI_ACTIVITY_KIND_SYNCHRONIZATION_V3": 'start, "end", globalPid, syncType',
-    "ENUM_CUPTI_SYNC_TYPE": 'id, name',
+    "ENUM_CUPTI_SYNC_TYPE": "id, name",
 }
 
 _TC_ELIGIBLE_PATTERN = "'(gemm|conv|linear|attention|matmul)'"

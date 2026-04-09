@@ -5,6 +5,7 @@ from ..base import Skill
 
 def _execute(conn, **kwargs):
     from nsys_ai.connection import DuckDBAdapter, wrap_connection
+
     adapter = wrap_connection(conn)
 
     if isinstance(adapter, DuckDBAdapter):

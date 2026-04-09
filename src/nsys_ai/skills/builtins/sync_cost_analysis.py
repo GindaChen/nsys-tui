@@ -63,9 +63,15 @@ def _execute_sync_analysis_impl(conn, **kwargs) -> list[dict]:
 
     # Guard against SQL injection from maliciously crafted table names
     if not is_safe_identifier(sync_table) or not is_safe_identifier(type_table):
-        return [{"total_sync_wall_ms": 0.0, "sync_by_type_ms": {},
-                 "profile_span_ms": 0.0, "sync_density_pct": 0.0,
-                 "error": f"Unsafe table name resolved: {sync_table!r} / {type_table!r}"}]
+        return [
+            {
+                "total_sync_wall_ms": 0.0,
+                "sync_by_type_ms": {},
+                "profile_span_ms": 0.0,
+                "sync_density_pct": 0.0,
+                "error": f"Unsafe table name resolved: {sync_table!r} / {type_table!r}",
+            }
+        ]
 
     trim_start = kwargs.get("trim_start_ns")
     trim_end = kwargs.get("trim_end_ns")
@@ -74,6 +80,7 @@ def _execute_sync_analysis_impl(conn, **kwargs) -> list[dict]:
         try:
             # Attempt to retrieve true profile bounds to clamp host events
             from ...profile import Profile
+
             prof = Profile._from_conn(conn)
             p_start, p_end = prof.meta.time_range
             trim_start = trim_start if trim_start is not None else p_start
@@ -111,13 +118,15 @@ def _execute_sync_analysis_impl(conn, **kwargs) -> list[dict]:
         rows = cur.fetchall()
     except DB_ERRORS:
         # Table might not exist in old profiles
-        return [{
-            "total_sync_wall_ms": 0.0,
-            "sync_by_type_ms": {},
-            "profile_span_ms": 0.0,
-            "sync_density_pct": 0.0,
-            "error": "Synchronization tables not found in profile"
-        }]
+        return [
+            {
+                "total_sync_wall_ms": 0.0,
+                "sync_by_type_ms": {},
+                "profile_span_ms": 0.0,
+                "sync_density_pct": 0.0,
+                "error": "Synchronization tables not found in profile",
+            }
+        ]
 
     # Filter and clamp intervals
     global_intervals = []
@@ -154,12 +163,14 @@ def _execute_sync_analysis_impl(conn, **kwargs) -> list[dict]:
     if profile_span_ms > 0:
         sync_density_pct = (total_sync_wall_ms / profile_span_ms) * 100
 
-    return [{
-        "total_sync_wall_ms": round(total_sync_wall_ms, 3),
-        "sync_by_type_ms": sync_by_type_ms,
-        "profile_span_ms": round(profile_span_ms, 3),
-        "sync_density_pct": round(sync_density_pct, 2)
-    }]
+    return [
+        {
+            "total_sync_wall_ms": round(total_sync_wall_ms, 3),
+            "sync_by_type_ms": sync_by_type_ms,
+            "profile_span_ms": round(profile_span_ms, 3),
+            "sync_density_pct": round(sync_density_pct, 2),
+        }
+    ]
 
 
 def _format_sync_analysis(rows: list[dict]) -> str:
@@ -177,7 +188,9 @@ def _format_sync_analysis(rows: list[dict]) -> str:
 
     lines.append("\n  Breakdown by Sync Type:")
     if m["sync_by_type_ms"]:
-        for t_name, ms_val in sorted(m["sync_by_type_ms"].items(), key=lambda x: x[1], reverse=True):
+        for t_name, ms_val in sorted(
+            m["sync_by_type_ms"].items(), key=lambda x: x[1], reverse=True
+        ):
             lines.append(f"    - {t_name:<30}: {ms_val:8.1f}ms")
     else:
         lines.append("    (None)")
@@ -192,5 +205,5 @@ SKILL = Skill(
     category="system",
     sql="",
     execute_fn=_execute_sync_analysis,
-    format_fn=_format_sync_analysis
+    format_fn=_format_sync_analysis,
 )

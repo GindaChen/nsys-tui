@@ -22,34 +22,34 @@ import subprocess  # nosec B404 — only used for hardcoded nvidia-smi
 # ---------------------------------------------------------------------------
 GPU_SPECS: dict[str, tuple[float, float]] = {
     # === Blackwell (2024-2025) ===
-    "B200": (2250.0, 8000),      # GB200/B200 SXM — BF16 dense, 8TB/s HBM3e
-    "B100": (1750.0, 8000),      # BF16 dense, 8TB/s HBM3e
-    "GB200": (2250.0, 8000),     # Grace Blackwell
-    "RTX 5090": (838.0, 1792),   # GeForce RTX 5090 — BF16/FP16 dense, GDDR7
-    "RTX 5080": (453.0, 1024),   # GeForce RTX 5080 — BF16/FP16 dense, GDDR7
-    "RTX 5070 Ti": (370.0, 896), # GeForce RTX 5070 Ti — BF16/FP16 dense, GDDR7
-    "RTX 5070": (246.0, 672),    # GeForce RTX 5070 — BF16/FP16 dense, GDDR7
+    "B200": (2250.0, 8000),  # GB200/B200 SXM — BF16 dense, 8TB/s HBM3e
+    "B100": (1750.0, 8000),  # BF16 dense, 8TB/s HBM3e
+    "GB200": (2250.0, 8000),  # Grace Blackwell
+    "RTX 5090": (838.0, 1792),  # GeForce RTX 5090 — BF16/FP16 dense, GDDR7
+    "RTX 5080": (453.0, 1024),  # GeForce RTX 5080 — BF16/FP16 dense, GDDR7
+    "RTX 5070 Ti": (370.0, 896),  # GeForce RTX 5070 Ti — BF16/FP16 dense, GDDR7
+    "RTX 5070": (246.0, 672),  # GeForce RTX 5070 — BF16/FP16 dense, GDDR7
     # === Hopper (2022-2023) ===
-    "H200": (989.0, 4800),       # H200 SXM — BF16 dense, 4.8TB/s HBM3e
-    "H100 SXM": (989.0, 3350),   # H100 SXM5 — BF16 dense, 3.35TB/s HBM3
+    "H200": (989.0, 4800),  # H200 SXM — BF16 dense, 4.8TB/s HBM3e
+    "H100 SXM": (989.0, 3350),  # H100 SXM5 — BF16 dense, 3.35TB/s HBM3
     "H100 80GB HBM3": (989.0, 3350),
     "H100 PCIe": (756.0, 2039),  # H100 PCIe — BF16 dense, 2TB/s HBM2e
-    "H100 NVL": (835.0, 3900),   # H100 NVL — BF16 dense, 3.9TB/s HBM3
-    "H800": (989.0, 3350),       # H800 (China variant, same die)
-    "GH100": (989.0, 3350),      # ASIC code
+    "H100 NVL": (835.0, 3900),  # H100 NVL — BF16 dense, 3.9TB/s HBM3
+    "H800": (989.0, 3350),  # H800 (China variant, same die)
+    "GH100": (989.0, 3350),  # ASIC code
     # === Ada Lovelace (2022-2023) ===
-    "L40S": (362.0, 864),        # L40S — BF16/FP16 dense, GDDR6
-    "L40": (181.0, 864),         # L40 — BF16/FP16 dense, GDDR6
-    "L4": (121.0, 300),          # L4 — BF16/FP16 dense, GDDR6
-    "RTX 6000 Ada": (364.0, 960),# RTX 6000 Ada Generation, GDDR6
-    "RTX 5880 Ada": (305.0, 864),# RTX 5880 Ada
-    "RTX 5000 Ada": (200.0, 576),# RTX 5000 Ada
-    "RTX 4500 Ada": (160.0, 432),# RTX 4500 Ada
-    "RTX 4000 Ada": (102.0, 360),# RTX 4000 Ada
-    "RTX 4090": (165.2, 1008),   # GeForce RTX 4090 — BF16/FP16 dense (w/ FP32 accum)
-    "AD102": (362.0, 864),       # ASIC code
+    "L40S": (362.0, 864),  # L40S — BF16/FP16 dense, GDDR6
+    "L40": (181.0, 864),  # L40 — BF16/FP16 dense, GDDR6
+    "L4": (121.0, 300),  # L4 — BF16/FP16 dense, GDDR6
+    "RTX 6000 Ada": (364.0, 960),  # RTX 6000 Ada Generation, GDDR6
+    "RTX 5880 Ada": (305.0, 864),  # RTX 5880 Ada
+    "RTX 5000 Ada": (200.0, 576),  # RTX 5000 Ada
+    "RTX 4500 Ada": (160.0, 432),  # RTX 4500 Ada
+    "RTX 4000 Ada": (102.0, 360),  # RTX 4000 Ada
+    "RTX 4090": (165.2, 1008),  # GeForce RTX 4090 — BF16/FP16 dense (w/ FP32 accum)
+    "AD102": (362.0, 864),  # ASIC code
     "RTX 4080 SUPER": (204.0, 736),
-    "RTX 4080": (204.0, 716),    # GeForce RTX 4080 — BF16/FP16 dense
+    "RTX 4080": (204.0, 716),  # GeForce RTX 4080 — BF16/FP16 dense
     "RTX 4070 Ti SUPER": (184.0, 672),
     "RTX 4070 Ti": (184.0, 504),
     "RTX 4070 SUPER": (175.0, 504),
@@ -62,7 +62,7 @@ GPU_SPECS: dict[str, tuple[float, float]] = {
     "A100 80GB": (312.0, 2039),  # A100 80GB (SXM or PCIe) — BF16 dense
     "A100 PCIe": (312.0, 1555),
     "A100": (312.0, 2039),
-    "GA100": (312.0, 2039),      # ASIC code
+    "GA100": (312.0, 2039),  # ASIC code
     "A30": (165.0, 933),
     "A10G": (125.0, 600),
     "A10": (125.0, 600),
@@ -70,25 +70,25 @@ GPU_SPECS: dict[str, tuple[float, float]] = {
     "A16": (16.9, 200),
     "A2": (36.0, 200),
     "A800": (312.0, 2039),
-    "RTX A6000": (310.0, 768),   # RTX A6000 Ampere
+    "RTX A6000": (310.0, 768),  # RTX A6000 Ampere
     "RTX A5500": (256.0, 768),
     "RTX A5000": (222.0, 768),
     "RTX A4500": (185.0, 640),
     "RTX A4000": (153.0, 448),
-    "RTX 3090 Ti": (160.0, 1008),# GeForce RTX 3090 Ti
-    "RTX 3090": (142.0, 936),    # GeForce RTX 3090
+    "RTX 3090 Ti": (160.0, 1008),  # GeForce RTX 3090 Ti
+    "RTX 3090": (142.0, 936),  # GeForce RTX 3090
     "RTX 3080 Ti": (136.0, 912),
     "RTX 3080": (119.0, 760),
     "RTX 3070 Ti": (87.0, 608),
     "RTX 3070": (81.0, 448),
     # === Turing (2018-2019) ===
-    "T4": (65.0, 320),           # T4 — FP16 dense, GDDR6
+    "T4": (65.0, 320),  # T4 — FP16 dense, GDDR6
     "RTX 2080 Ti": (53.8, 616),  # GeForce RTX 2080 Ti
     # === Volta (2017-2018) ===
-    "V100 SXM2": (125.0, 900),   # V100 SXM2 — FP16 dense, HBM2
-    "V100S PCIe": (130.0, 1134), # V100S PCIe
-    "V100 PCIe": (112.0, 900),   # V100 PCIe
-    "V100": (112.0, 900),        # V100 (PCIe fallback)
+    "V100 SXM2": (125.0, 900),  # V100 SXM2 — FP16 dense, HBM2
+    "V100S PCIe": (130.0, 1134),  # V100S PCIe
+    "V100 PCIe": (112.0, 900),  # V100 PCIe
+    "V100": (112.0, 900),  # V100 (PCIe fallback)
 }
 
 

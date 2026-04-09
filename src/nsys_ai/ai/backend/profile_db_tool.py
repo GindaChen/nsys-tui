@@ -107,6 +107,7 @@ def query_profile_db(
         )
 
     from nsys_ai.connection import DuckDBAdapter, SQLiteAdapter, wrap_connection
+
     adapter = wrap_connection(conn)
     is_duckdb = isinstance(adapter, DuckDBAdapter)
     is_sqlite = isinstance(adapter, SQLiteAdapter)
@@ -132,6 +133,7 @@ def query_profile_db(
             table_name = table_token.strip("'\"`[]")
 
             from nsys_ai.connection import is_safe_identifier
+
             if not is_safe_identifier(table_name):
                 return f"Error: Invalid or unsafe table name '{table_name}'."
 
@@ -146,6 +148,7 @@ def query_profile_db(
     error_types = (sqlite3.Error,)
     try:
         import duckdb
+
         error_types = error_types + (duckdb.Error,)
     except ImportError:
         pass
@@ -239,6 +242,7 @@ def get_profile_schema(
     parts = []
 
     from nsys_ai.connection import DB_ERRORS, DuckDBAdapter, wrap_connection
+
     adapter = wrap_connection(conn)
     is_duckdb = isinstance(adapter, DuckDBAdapter)
 
@@ -278,9 +282,7 @@ _schema_cache: dict[str, str] = {}
 _schema_cache_lock = threading.Lock()
 
 
-def get_profile_schema_cached(
-    conn, path: str | None = None
-) -> str:
+def get_profile_schema_cached(conn, path: str | None = None) -> str:
     """
     Return schema for the given connection, using a cache keyed by path when provided.
     If path is None, always calls get_profile_schema(conn). Call with path when the

@@ -63,6 +63,7 @@ def _execute(conn, **kwargs):
 
     try:
         from ...skills.registry import get_skill
+
         sync_skill = get_skill("sync_cost_analysis")
         if sync_skill:
             sync_data = sync_skill.execute(conn, **kwargs)
@@ -86,16 +87,12 @@ def _format(rows):
         f"  Total span:    {r['total_ms']:.1f}ms",
         f"  Compute only:  {r['compute_only_ms']:.1f}ms",
         f"  NCCL only:     {r['nccl_only_ms']:.1f}ms",
-        f"  Overlap:       {r['overlap_ms']:.1f}ms"
-        f" ({r['overlap_pct']}% of NCCL overlapped)",
+        f"  Overlap:       {r['overlap_ms']:.1f}ms ({r['overlap_pct']}% of NCCL overlapped)",
         f"  Idle:          {r['idle_ms']:.1f}ms",
     ]
     if r.get("sync_ms"):
         lines.append(f"  ⚡ CPU Sync:     {r['sync_ms']:.1f}ms (global host-side blocking)")
-    lines.append(
-        f"  Kernels:       {r['compute_kernels']} compute"
-        f" + {r['nccl_kernels']} NCCL"
-    )
+    lines.append(f"  Kernels:       {r['compute_kernels']} compute + {r['nccl_kernels']} NCCL")
     return "\n".join(lines)
 
 

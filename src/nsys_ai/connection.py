@@ -7,6 +7,7 @@ from typing import Any, Protocol, runtime_checkable
 DB_ERRORS: tuple[type[Exception], ...] = (sqlite3.Error, sqlite3.OperationalError)
 try:
     import duckdb  # noqa: E402
+
     DB_ERRORS = DB_ERRORS + (duckdb.Error,)
 except ImportError:
     pass
@@ -28,23 +29,17 @@ class ConnectionAdapter(Protocol):
     """Abstracts SQLite and DuckDB connections for cross-engine compatibility."""
 
     @property
-    def raw_conn(self) -> Any:
-        ...
+    def raw_conn(self) -> Any: ...
 
-    def execute(self, sql: str, parameters: tuple | list = ()) -> Any:
-        ...
+    def execute(self, sql: str, parameters: tuple | list = ()) -> Any: ...
 
-    def resolve_activity_tables(self) -> dict[str, str]:
-        ...
+    def resolve_activity_tables(self) -> dict[str, str]: ...
 
-    def detect_nvtx_text_id(self) -> bool:
-        ...
+    def detect_nvtx_text_id(self) -> bool: ...
 
-    def get_table_columns(self, table_name: str) -> list[str]:
-        ...
+    def get_table_columns(self, table_name: str) -> list[str]: ...
 
-    def get_table_names(self) -> set[str]:
-        ...
+    def get_table_names(self) -> set[str]: ...
 
 
 class SQLiteAdapter:
@@ -100,6 +95,7 @@ class DuckDBAdapter:
 
     def execute(self, sql: str, parameters: tuple | list = ()) -> Any:
         from .sql_compat import sqlite_to_duckdb
+
         rewritten_sql = sqlite_to_duckdb(sql)
         # duckdb parameters need to be passed directly to connection execute
         return self.conn.execute(rewritten_sql, list(parameters) if parameters else [])
@@ -182,6 +178,7 @@ def wrap_connection(conn) -> ConnectionAdapter:
     is_duckdb = False
     try:
         import duckdb
+
         if isinstance(conn, duckdb.DuckDBPyConnection):
             is_duckdb = True
     except ImportError:

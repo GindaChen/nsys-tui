@@ -40,6 +40,7 @@ def _sort_merge_attribute(
     popped at most once; each runtime call is processed once).
     """
     from .connection import wrap_connection
+
     adapter = wrap_connection(conn)
     resolved_tables = adapter.resolve_activity_tables()
 
@@ -55,7 +56,7 @@ def _sort_merge_attribute(
         trim_params = (trim[0], trim[1])
 
     kr_rows = adapter.execute(
-            f"""
+        f"""
         SELECT r.globalTid, r.start, r.[end],
                k.start AS ks, k.[end] AS ke, k.shortName
         FROM {kernel_table} k
@@ -79,7 +80,7 @@ def _sort_merge_attribute(
         text_join = ""
 
     nvtx_rows = adapter.execute(
-            f"""
+        f"""
         SELECT n.globalTid, n.start, n.[end], {text_expr} AS text
         FROM {nvtx_table} n
         {text_join}
@@ -194,6 +195,7 @@ def attribute_kernels_to_nvtx(
     # DuckDB: Try reading from purely precomputed Parquet bounds!
     try:
         from .connection import DuckDBAdapter, wrap_connection
+
         adapter = wrap_connection(conn)
 
         if isinstance(adapter, DuckDBAdapter):
@@ -203,7 +205,9 @@ def attribute_kernels_to_nvtx(
                 trim_sql = "WHERE k_start >= ? AND k_end <= ?"
                 params = [trim[0], trim[1]]
 
-            cur = adapter.execute(f"SELECT * FROM nvtx_kernel_map {trim_sql} ORDER BY k_start", params)
+            cur = adapter.execute(
+                f"SELECT * FROM nvtx_kernel_map {trim_sql} ORDER BY k_start", params
+            )
             cols = [d[0] for d in cur.description]
             return [dict(zip(cols, row)) for row in cur.fetchall()]
     except Exception:

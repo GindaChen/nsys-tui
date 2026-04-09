@@ -4,7 +4,7 @@ fingerprint.py — Detects the ML framework and network topology from Nsight SQL
 Extracts a ProfileFingerprint efficiently using O(1) string pool queries.
 """
 
-import sqlite3
+import typing
 from dataclasses import dataclass, field
 
 from .connection import DB_ERRORS, wrap_connection
@@ -25,7 +25,10 @@ class ProfileFingerprint:
             f"Multi-node (RDMA): {'yes' if self.multi_node else 'no'}",
         ]
         if self.nic_summary:
-            lines.append(f"Network: {self.nic_summary}")
+            import re
+
+            safe_nic = re.sub(r"[^\w\s\-.,()]", "", str(self.nic_summary)).strip()[:200]
+            lines.append(f"Network: {safe_nic}")
         if self.precision_notes:
             lines.append("Notes: " + "; ".join(self.precision_notes))
         return "\n".join(lines)
@@ -34,16 +37,15 @@ class ProfileFingerprint:
 # Ranked by priority / specificity.
 # An environment matching multiple (e.g. Megatron and PyTorch) resolves to the first match.
 FRAMEWORK_PRIORITY = [
-    ("vLLM",        ["paged_attention", "vllm", "SamplerOutput", "ModelRunner"]),
-    ("SGLang",      ["sglang", "RadixAttention", "TokenAttention"]),
+    ("vLLM", ["paged_attention", "vllm", "SamplerOutput", "ModelRunner"]),
+    ("SGLang", ["sglang", "RadixAttention", "TokenAttention"]),
     ("Megatron-LM", ["Megatron", "p2p_comm", "FlushGroups", "MegatronModule"]),
-    ("DeepSpeed",   ["DeepSpeed", "ZeRO", "offload", "DeepSpeedEngine"]),
-    ("PyTorch",     ["forward", "backward", "optimizer_step", "flash_attn"]),
+    ("DeepSpeed", ["DeepSpeed", "ZeRO", "offload", "DeepSpeedEngine"]),
+    ("PyTorch", ["forward", "backward", "optimizer_step", "flash_attn"]),
 ]
 
 _LOWERCASE_FRAMEWORK_PRIORITY = [
-    (fw, [kw.lower() for kw in keywords])
-    for fw, keywords in FRAMEWORK_PRIORITY
+    (fw, [kw.lower() for kw in keywords]) for fw, keywords in FRAMEWORK_PRIORITY
 ]
 
 # Known high-performance interconnect vendors
@@ -54,7 +56,8 @@ KNOWN_NIC_VENDORS = {
     32902: "Intel",
 }
 
-def get_fingerprint(conn: sqlite3.Connection) -> ProfileFingerprint:
+
+def get_fingerprint(conn: typing.Any) -> ProfileFingerprint:
     adapter = wrap_connection(conn)
     tables = adapter.get_table_names()
 
@@ -85,7 +88,9 @@ def get_fingerprint(conn: sqlite3.Connection) -> ProfileFingerprint:
         _scan_table_strings("SELECT value FROM StringIds WHERE value IS NOT NULL")
 
     if not found_frameworks and "NVTX_EVENTS" in tables:
-        _scan_table_strings("SELECT DISTINCT text FROM NVTX_EVENTS WHERE text IS NOT NULL LIMIT 1000")
+        _scan_table_strings(
+            "SELECT DISTINCT text FROM NVTX_EVENTS WHERE text IS NOT NULL LIMIT 1000"
+        )
 
     # Match framework with strict explicit prioritization
     framework = "Generic CUDA"
@@ -114,14 +119,18 @@ def get_fingerprint(conn: sqlite3.Connection) -> ProfileFingerprint:
                 except (ValueError, TypeError):
                     pass
                 vendor_name = KNOWN_NIC_VENDORS.get(v_id, "NIC")
-                nic_summary = f"{vendor_name} hardware detected (vendorId: {row[0]}, name: {row[1]})"
+                nic_summary = (
+                    f"{vendor_name} hardware detected (vendorId: {row[0]}, name: {row[1]})"
+                )
         except DB_ERRORS:
             pass
 
     distributed = False
     if "NVTX_PAYLOAD_SCHEMAS" in tables:
         try:
-            cur = adapter.execute("SELECT 1 FROM NVTX_PAYLOAD_SCHEMAS WHERE name LIKE '%NCCL%' LIMIT 1")
+            cur = adapter.execute(
+                "SELECT 1 FROM NVTX_PAYLOAD_SCHEMAS WHERE name LIKE '%NCCL%' LIMIT 1"
+            )
             if cur.fetchone():
                 distributed = True
         except DB_ERRORS:
@@ -132,5 +141,5 @@ def get_fingerprint(conn: sqlite3.Connection) -> ProfileFingerprint:
         distributed=distributed,
         multi_node=multi_node,
         nic_summary=nic_summary,
-        precision_notes=[]
+        precision_notes=[],
     )

@@ -272,7 +272,9 @@ def _format(rows):
     dq = m.get("data_quality", {})
     overhead_pct_raw = dq.get("overhead_pct_raw", dq.get("overhead_pct", 0))
     if overhead_pct_raw >= 0.1:
-        lines.append(f"  ⚠️ Profiler Overhead: {dq.get('profiler_overhead_ms', 0):.1f}ms ({dq.get('overhead_pct', overhead_pct_raw)}% of span)")
+        lines.append(
+            f"  ⚠️ Profiler Overhead: {dq.get('profiler_overhead_ms', 0):.1f}ms ({dq.get('overhead_pct', overhead_pct_raw)}% of span)"
+        )
 
     # Top kernels
     lines.append("")
@@ -317,7 +319,9 @@ def _format(rows):
         lines.append(f"  GPU Idle: {idle['gap_count']} gaps, {idle.get('idle_pct', 0)}% of profile")
     if sync.get("total_sync_wall_ms"):
         lines.append("")
-        lines.append(f"  CPU Sync Block: {sync.get('total_sync_wall_ms', 0):.1f}ms ({sync.get('sync_density_pct', 0)}% of profile)")
+        lines.append(
+            f"  CPU Sync Block: {sync.get('total_sync_wall_ms', 0):.1f}ms ({sync.get('sync_density_pct', 0)}% of profile)"
+        )
 
     # Root causes
     rcs = m.get("root_causes", [])
