@@ -23,8 +23,8 @@ import json
 import logging
 import os
 import re
-import tempfile
 import sys
+import tempfile
 import time
 from hashlib import sha256
 from pathlib import Path
