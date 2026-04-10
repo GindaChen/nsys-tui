@@ -24,7 +24,6 @@ import logging
 import os
 import re
 import sys
-import tempfile
 import time
 from hashlib import sha256
 from pathlib import Path
@@ -589,7 +588,9 @@ def _repair_parquet_binary_columns_to_disk(parquet_file: Path, table_name: str) 
         f"{','.join(sorted(binary_columns))}"
     )
     digest = sha256(cache_key.encode("utf-8")).hexdigest()[:20]
-    out_dir = Path(tempfile.gettempdir()) / "nsys_ai_parquetdir_repaired"
+    # Keep repaired artifacts scoped to the profile directory instead of
+    # global /tmp, so lifecycle naturally tracks the source parquetdir.
+    out_dir = parquet_file.parent / ".nsys_ai_parquetdir_repaired"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{parquet_file.stem}.{digest}.parquet"
     if out_path.exists():
