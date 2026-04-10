@@ -150,3 +150,24 @@ def test_resolve_nsys_rep_timeout(monkeypatch, tmp_path: Path):
     with pytest.raises(ExportTimeoutError) as exc:
         profile_mod.resolve_profile_path(str(rep))
     assert "timed out after 300 seconds" in str(exc.value)
+
+
+def test_sqlite_blob_reexport_check_uses_schema_not_row_values(tmp_path: Path):
+    sqlite_path = tmp_path / "blob_schema_only.sqlite"
+    with sqlite3.connect(sqlite_path) as conn:
+        cur = conn.cursor()
+        cur.executescript("""
+            CREATE TABLE NVTX_EVENTS (
+                start INTEGER,
+                end INTEGER,
+                binaryData BLOB
+            );
+            CREATE TABLE NVTX_PAYLOAD_SCHEMAS (
+                domainId INTEGER,
+                schemaId INTEGER
+            );
+            INSERT INTO NVTX_EVENTS (start, end, binaryData) VALUES (1, 2, NULL);
+        """)
+        conn.commit()
+
+    assert profile_mod._sqlite_needs_blob_reexport(str(sqlite_path)) is False

@@ -23,8 +23,10 @@ import json
 import logging
 import os
 import re
+import tempfile
 import sys
 import time
+from hashlib import sha256
 from pathlib import Path
 
 import duckdb
@@ -514,10 +516,22 @@ def _register_parquetdir_tables(
         # Escape double-quotes in identifiers as defence-in-depth.
         safe_name = table_name.replace('"', '""')
         if table_name in _PARQUETDIR_BINARY_COLUMNS:
-            arrow_name = f"_parquetdir_{table_name}"
-            table = _load_parquet_table_for_duckdb(parquet_file, table_name)
-            db.register(arrow_name, table)
-            db.execute(f'CREATE VIEW "{safe_name}" AS SELECT * FROM "{arrow_name}"')
+            try:
+                repaired = _repair_parquet_binary_columns_to_disk(parquet_file, table_name)
+                safe_fpath = str(repaired).replace("'", "''")
+                db.execute(
+                    f'CREATE VIEW "{safe_name}" AS SELECT * FROM read_parquet(\'{safe_fpath}\')'
+                )
+            except Exception as exc:
+                log.warning(
+                    "Falling back to in-memory Arrow repair for %s due to: %s",
+                    parquet_file,
+                    exc,
+                )
+                arrow_name = f"_parquetdir_{table_name}"
+                table = _load_parquet_table_for_duckdb(parquet_file, table_name)
+                db.register(arrow_name, table)
+                db.execute(f'CREATE VIEW "{safe_name}" AS SELECT * FROM "{arrow_name}"')
             continue
 
         safe_fpath = str(parquet_file).replace("'", "''")
@@ -557,6 +571,62 @@ def _load_parquet_table_for_duckdb(parquet_file: Path, table_name: str):
             batch_arrays.append(column)
         batches.append(pa.record_batch(batch_arrays, names=batch.schema.names))
     return pa.Table.from_batches(batches)
+
+
+def _repair_parquet_binary_columns_to_disk(parquet_file: Path, table_name: str) -> Path:
+    """Repair mis-typed binary columns into a cached parquet file on disk."""
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    import pyarrow.parquet as pq
+
+    binary_columns = set(_PARQUETDIR_BINARY_COLUMNS.get(table_name, ()))
+    if not binary_columns:
+        return parquet_file
+
+    src_stat = parquet_file.stat()
+    cache_key = (
+        f"{parquet_file.resolve()}:{src_stat.st_mtime_ns}:{src_stat.st_size}:"
+        f"{','.join(sorted(binary_columns))}"
+    )
+    digest = sha256(cache_key.encode("utf-8")).hexdigest()[:20]
+    out_dir = Path(tempfile.gettempdir()) / "nsys_ai_parquetdir_repaired"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{parquet_file.stem}.{digest}.parquet"
+    if out_path.exists():
+        return out_path
+
+    parquet = pq.ParquetFile(parquet_file)
+    source_schema = parquet.schema_arrow
+    fields = []
+    cast_targets: dict[str, pa.DataType] = {}
+    for field in source_schema:
+        if field.name in binary_columns:
+            cast_targets[field.name] = pa.large_binary()
+            fields.append(
+                pa.field(
+                    field.name,
+                    pa.large_binary(),
+                    nullable=field.nullable,
+                    metadata=field.metadata,
+                )
+            )
+        else:
+            fields.append(field)
+    target_schema = pa.schema(fields, metadata=source_schema.metadata)
+
+    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+    with pq.ParquetWriter(tmp_path, target_schema, compression="zstd") as writer:
+        for batch in parquet.iter_batches():
+            arrays = []
+            for idx, field in enumerate(batch.schema):
+                col = batch.column(idx)
+                target_type = cast_targets.get(field.name)
+                if target_type is not None:
+                    col = pc.cast(col, target_type, safe=False)
+                arrays.append(col)
+            writer.write_batch(pa.record_batch(arrays, schema=target_schema))
+    tmp_path.replace(out_path)
+    return out_path
 
 
 def _export_nvtx_with_blobs(sqlite_path: str, nvtx_table: str, cache_dir: Path) -> None:

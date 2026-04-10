@@ -866,10 +866,10 @@ def _resolve_parquetdir_path(path: str) -> str:
 
 
 def _sqlite_needs_blob_reexport(path: str) -> bool:
-    """Check whether a SQLite export is missing NVTX extended payload values.
+    """Check whether a SQLite export is missing NVTX payload schema/blob support.
 
-    The communicator-aware NCCL analysis relies on `binaryData` (or another
-    populated NVTX payload carrier field) being preserved during export.
+    This is a capability check (schema/tables present), not a content check.
+    Some profiles legitimately contain no NVTX payload rows.
     """
     if not (os.path.exists(path) and os.path.getsize(path) > 0):
         return True
@@ -884,28 +884,9 @@ def _sqlite_needs_blob_reexport(path: str) -> bool:
                 # --include-blobs=true → needs re-export.
                 return True
             cols = {row[1] for row in cur.execute("PRAGMA table_info(NVTX_EVENTS)")}
-            payload_cols = [
-                col
-                for col in (
-                    "binaryData",
-                    "uint64Value",
-                    "int64Value",
-                    "doubleValue",
-                    "uint32Value",
-                    "int32Value",
-                    "floatValue",
-                    "jsonText",
-                    "jsonTextId",
-                )
-                if col in cols
-            ]
-            if not payload_cols:
-                return True
-            predicate = " OR ".join(f"{col} IS NOT NULL" for col in payload_cols)
-            has_payload = cur.execute(
-                f"SELECT 1 FROM NVTX_EVENTS WHERE {predicate} LIMIT 1"
-            ).fetchone()
-            return has_payload is None
+            # Require binaryData column presence; row values may legitimately
+            # all be NULL on profiles without payload-bearing NVTX ranges.
+            return "binaryData" not in cols
     except sqlite3.Error:
         # If the file is unreadable or corrupt, we cannot use it
         return True
