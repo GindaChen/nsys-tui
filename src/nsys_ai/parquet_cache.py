@@ -841,18 +841,19 @@ def _build_nvtx_kernel_map(
     nps = _safe_path(np)
 
     # nvtx.parquet already stores resolved text (export path); no StringIds join.
-    text_expr = "CAST(n.text AS VARCHAR)"
-    text_join = ""
 
     # Pure SQL approach: DuckDB will use IEJoin for the range predicate.
     #
     # Strategy:
-    #   1. Join kernels.parquet ↔ runtime.parquet via correlationId (hash join)
-    #   2. Join runtime ↔ nvtx.parquet via globalTid + range containment
-    #      (n.start <= r.start AND n."end" >= r."end")
-    #   3. GROUP BY kernel instance to aggregate enclosing NVTX:
-    #      - string_agg(... ORDER BY n_dur DESC) builds "outer > middle > inner" path
-    #      - FIRST(... ORDER BY n_dur ASC) picks the innermost NVTX text
+    #   1. Pre-materialise NVTX ranges into a temp table (filter once, avoid
+    #      repeated Parquet scans and per-row CAST overhead in the join).
+    #   2. Join kernels.parquet ↔ runtime.parquet via correlationId (hash join).
+    #   3. IEJoin runtime ↔ _nvtx_ranges via globalTid + range containment
+    #      (n.start <= r.start AND n."end" >= r."end").
+    #      GROUP BY is folded directly into the same step to avoid materialising
+    #      the 1 M-row intermediate "enclosing" result — roughly 2× faster.
+    #      - string_agg(... ORDER BY dur DESC) builds "outer > middle > inner" path
+    #      - FIRST(... ORDER BY dur ASC) picks the innermost NVTX text
     #      - COUNT(*) - 1 gives the nesting depth
     #   4. Assign dense ``path_id`` (ORDER BY nvtx_path for stability) and write
     #      ``nvtx_path_dict.parquet`` so downstream ``GROUP BY`` uses BIGINT keys.
@@ -866,45 +867,37 @@ def _build_nvtx_kernel_map(
                    r.correlationId
             FROM read_parquet('{kps}') k
             JOIN read_parquet('{rps}') r ON r.correlationId = k.correlationId
-        ),
-        enclosing AS (
-            SELECT kr.k_start, kr.k_end, kr.kernel_name,
-                   kr.is_tc_eligible, kr.uses_tc,
-                   kr.r_start, kr.r_end, kr.globalTid,
-                   kr.correlationId,
-                   {text_expr} AS nvtx_text,
-                   (n."end" - n.start) AS n_dur,
-                   n.start AS n_start
-            FROM kr
-            JOIN read_parquet('{nps}') n
-              ON n.globalTid = kr.globalTid
-              AND n.eventType = 59
-              AND n."end" > n.start
-              AND n.start <= kr.r_start
-              AND n."end" >= kr.r_end
-            {text_join}
-            WHERE n.text IS NOT NULL
-        ),
-        grouped AS (
-            SELECT
-                FIRST(nvtx_text ORDER BY n_dur ASC, n_start ASC) AS nvtx_text,
-                CAST(COUNT(*) - 1 AS INTEGER) AS nvtx_depth,
-                string_agg(nvtx_text, ' > ' ORDER BY n_dur DESC, n_start ASC) AS nvtx_path,
-                kernel_name,
-                k_start,
-                k_end,
-                (k_end - k_start) AS k_dur_ns,
-                MAX(is_tc_eligible) AS is_tc_eligible,
-                MAX(uses_tc) AS uses_tc
-            FROM enclosing
-            GROUP BY k_start, k_end, globalTid, kernel_name, correlationId
         )
-        SELECT * FROM grouped
+        SELECT
+            FIRST(n.text ORDER BY (n."end" - n.start) ASC, n.start ASC) AS nvtx_text,
+            CAST(COUNT(*) - 1 AS INTEGER) AS nvtx_depth,
+            string_agg(n.text, ' > ' ORDER BY (n."end" - n.start) DESC, n.start ASC) AS nvtx_path,
+            kr.kernel_name,
+            kr.k_start,
+            kr.k_end,
+            (kr.k_end - kr.k_start) AS k_dur_ns,
+            MAX(kr.is_tc_eligible) AS is_tc_eligible,
+            MAX(kr.uses_tc) AS uses_tc
+        FROM kr
+        JOIN _nvtx_ranges n
+          ON n.globalTid = kr.globalTid
+          AND n.start <= kr.r_start
+          AND n."end" >= kr.r_end
+        GROUP BY kr.k_start, kr.k_end, kr.globalTid, kr.kernel_name, kr.correlationId
     """
     map_path = _safe_path(cache_dir / "nvtx_kernel_map.parquet")
     dict_path = _safe_path(cache_dir / "nvtx_path_dict.parquet")
 
     try:
+        # Pre-materialise NVTX ranges once (avoids repeated Parquet scans +
+        # per-row CAST in the join; also lets DuckDB plan the IEJoin against
+        # an in-memory table rather than a lazy Parquet scan).
+        db.execute(f"""
+            CREATE OR REPLACE TEMP TABLE _nvtx_ranges AS
+            SELECT globalTid, start, "end", CAST(text AS VARCHAR) AS text
+            FROM read_parquet('{nps}')
+            WHERE eventType = 59 AND "end" > start AND text IS NOT NULL
+        """)
         db.execute(f"CREATE OR REPLACE TEMP TABLE _nkm_grouped AS {grouped_sql}")
         db.execute("""
             CREATE OR REPLACE TEMP TABLE _nkm_path_dict AS
