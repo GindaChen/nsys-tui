@@ -28,6 +28,11 @@ from ..base import Skill, SkillParam
 REPORT_FULL = "full"
 REPORT_COMPACT = "compact"
 
+# Above this many IDs, expanding IN (?,?,…) becomes slower than a full scan
+# and can hit SQLite's 999-parameter limit.  We drop the IN filter and let
+# leaf_to_group post-filter in Python instead.
+_INLINE_FILTER_LIMIT = 900
+
 
 def coerce_report_param(raw: object | None) -> tuple[str, str | None]:
     """Return (mode, error_message). Default full; error_message if invalid."""
@@ -582,12 +587,20 @@ def _execute(conn, **kwargs):
                     ]
                     selected_pids = list(dict.fromkeys(selected_pids))
                     if uses_pid and selected_pids:
-                        ph = ",".join("?" for _ in selected_pids)
-                        sql_k = (
-                            f"SELECT n.path_id, n.kernel_name, SUM(n.k_dur_ns) AS k_total "
-                            f"FROM nvtx_kernel_map n WHERE n.path_id IN ({ph})"
-                        )
-                        params_k = list(selected_pids)
+                        if len(selected_pids) <= _INLINE_FILTER_LIMIT:
+                            ph = ",".join("?" for _ in selected_pids)
+                            sql_k = (
+                                f"SELECT n.path_id, n.kernel_name, SUM(n.k_dur_ns) AS k_total "
+                                f"FROM nvtx_kernel_map n WHERE n.path_id IN ({ph})"
+                            )
+                            params_k = list(selected_pids)
+                        else:
+                            # Too many IDs to inline; full scan — leaf_to_group filters output
+                            sql_k = (
+                                "SELECT n.path_id, n.kernel_name, SUM(n.k_dur_ns) AS k_total "
+                                "FROM nvtx_kernel_map n WHERE 1=1"
+                            )
+                            params_k = []
                         if trim_start is not None and trim_end is not None:
                             sql_k += " AND n.k_start >= ? AND n.k_end <= ?"
                             params_k.extend([int(trim_start), int(trim_end)])
@@ -599,13 +612,21 @@ def _execute(conn, **kwargs):
                             gk = leaf_to_group.get(nvtx_p, nvtx_p)
                             k_times_by_group[gk][k_name] += k_total
                     else:
-                        placeholders = ",".join("?" for _ in selected_leaf_paths)
-                        sql_k = (
-                            f"SELECT n.nvtx_path, n.kernel_name, SUM(n.k_dur_ns) AS k_total "
-                            f"FROM nvtx_kernel_map n "
-                            f"WHERE n.nvtx_path IN ({placeholders})"
-                        )
-                        params_k = list(selected_leaf_paths)
+                        if len(selected_leaf_paths) <= _INLINE_FILTER_LIMIT:
+                            placeholders = ",".join("?" for _ in selected_leaf_paths)
+                            sql_k = (
+                                f"SELECT n.nvtx_path, n.kernel_name, SUM(n.k_dur_ns) AS k_total "
+                                f"FROM nvtx_kernel_map n "
+                                f"WHERE n.nvtx_path IN ({placeholders})"
+                            )
+                            params_k = list(selected_leaf_paths)
+                        else:
+                            # Too many paths to inline; full scan — leaf_to_group filters output
+                            sql_k = (
+                                "SELECT n.nvtx_path, n.kernel_name, SUM(n.k_dur_ns) AS k_total "
+                                "FROM nvtx_kernel_map n WHERE 1=1"
+                            )
+                            params_k = []
                         if trim_start is not None and trim_end is not None:
                             sql_k += " AND n.k_start >= ? AND n.k_end <= ?"
                             params_k.extend([int(trim_start), int(trim_end)])
@@ -647,8 +668,13 @@ def _execute(conn, **kwargs):
                     ]
                     sel_pids = list(dict.fromkeys(sel_pids))
                     if sel_pids:
-                        ph_pids = ",".join("?" for _ in sel_pids)
-                        params_k.extend(sel_pids)
+                        if len(sel_pids) <= _INLINE_FILTER_LIMIT:
+                            ph_pids = ",".join("?" for _ in sel_pids)
+                            _path_filter = f"WHERE mp.path_id IN ({ph_pids})"
+                            params_k.extend(sel_pids)
+                        else:
+                            # Too many IDs to inline; full scan — leaf_to_group filters output
+                            _path_filter = ""
                         sql_k = f"""
                         WITH kr AS (
                             SELECT r.globalTid, r.start AS r_start, r."end" AS r_end,
@@ -697,12 +723,17 @@ def _execute(conn, **kwargs):
                         )
                         SELECT mp.nvtx_path, mp.kernel_name, SUM(mp.k_dur_ns) AS k_total
                         FROM mp
-                        WHERE mp.path_id IN ({ph_pids})
+                        {_path_filter}
                         GROUP BY mp.nvtx_path, mp.kernel_name
                     """
                     else:
-                        placeholders = ",".join("?" for _ in selected_leaf_paths)
-                        params_k.extend(selected_leaf_paths)
+                        if len(selected_leaf_paths) <= _INLINE_FILTER_LIMIT:
+                            placeholders = ",".join("?" for _ in selected_leaf_paths)
+                            _path_filter2 = f"WHERE nvtx_path IN ({placeholders})"
+                            params_k.extend(selected_leaf_paths)
+                        else:
+                            # Too many paths to inline; full scan — leaf_to_group filters output
+                            _path_filter2 = ""
                         sql_k = f"""
                         WITH kr AS (
                             SELECT r.globalTid, r.start AS r_start, r."end" AS r_end,
@@ -742,7 +773,7 @@ def _execute(conn, **kwargs):
                         )
                         SELECT nvtx_path, kernel_name, SUM(k_dur_ns) AS k_total
                         FROM mapped
-                        WHERE nvtx_path IN ({placeholders})
+                        {_path_filter2}
                         GROUP BY nvtx_path, kernel_name
                     """
                     kernel_rows = conn.execute(sql_k, params_k).fetchall()
