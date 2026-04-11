@@ -278,7 +278,6 @@ def attribute_kernels_to_nvtx(
                 trim_clause = "WHERE k_start >= ? AND k_end <= ?"
                 trim_start = int(trim[0])
                 trim_end = int(trim[1])
-                trim_params = [trim_start, trim_end]
                 kr_where = 'WHERE k.start >= ? AND k."end" <= ?'
                 nvtx_where = 'AND n.start <= ? AND n."end" >= ?'
                 trim_params = [trim_start, trim_end, trim_end, trim_start, trim_start, trim_end]
