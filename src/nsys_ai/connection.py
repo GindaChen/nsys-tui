@@ -1,6 +1,7 @@
 import logging
 import re
 import sqlite3
+import weakref
 from typing import Any, Protocol, runtime_checkable
 
 # Narrow exception tuple for diagnostic query blocks.
@@ -22,6 +23,75 @@ _SAFE_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 def is_safe_identifier(name: str) -> bool:
     """Check if the string is safe to be structurally spliced into a SQL query."""
     return bool(_SAFE_IDENT_RE.match(name))
+
+
+# ── Per-connection probe cache ───────────────────────────────────────────
+# - DuckDB: ``DuckDBPyConnection`` rejects arbitrary ``setattr`` but is
+#   weak-referenceable → ``WeakKeyDictionary`` drops entries when the DB closes.
+# - SQLite: ``sqlite3.Connection`` is *not* weak-referenceable.  We key the
+#   dict by the connection object itself (identity hash).  This keeps a strong
+#   reference for the process lifetime, which is fine for the short-lived CLI
+#   and avoids the ``id()``-reuse hazard (recycled IDs after GC give false hits).
+
+_PROBE_MISS = object()
+_duck_probe_bags: weakref.WeakKeyDictionary[Any, dict[str, Any]] = weakref.WeakKeyDictionary()
+# sqlite3.Connection is not weak-referenceable, so we key by the connection
+# object itself (identity hash).  This keeps a strong reference for the
+# lifetime of the process, which is acceptable in a short-lived CLI.  Using
+# the object directly avoids the id()-reuse hazard (id() can be recycled
+# after a connection is closed and GC'd, giving false cache hits).
+_sqlite_probe_bags: dict[sqlite3.Connection, dict[str, Any]] = {}
+
+
+def _probe_cache_get(conn, key: str):
+    if isinstance(conn, sqlite3.Connection):
+        bag = _sqlite_probe_bags.get(conn)
+        if bag is None:
+            return _PROBE_MISS
+        return bag.get(key, _PROBE_MISS)
+    bag = _duck_probe_bags.get(conn)
+    if bag is None:
+        return _PROBE_MISS
+    return bag.get(key, _PROBE_MISS)
+
+
+def _probe_cache_set(conn, key: str, value) -> None:
+    if isinstance(conn, sqlite3.Connection):
+        _sqlite_probe_bags.setdefault(conn, {})[key] = value
+        return
+    try:
+        _duck_probe_bags.setdefault(conn, {})[key] = value
+    except TypeError:
+        pass
+
+
+def cached_nvtx_map_uses_path_id(conn) -> bool:
+    """True when ``nvtx_kernel_map`` + ``nvtx_path_dict`` expose ``path_id``."""
+    cached = _probe_cache_get(conn, "nvtx_path_id")
+    if cached is not _PROBE_MISS:
+        return cached
+    try:
+        conn.execute("SELECT path_id FROM nvtx_kernel_map LIMIT 0")
+        conn.execute("SELECT path_id FROM nvtx_path_dict LIMIT 0")
+        ok = True
+    except DB_ERRORS:
+        ok = False
+    _probe_cache_set(conn, "nvtx_path_id", ok)
+    return ok
+
+
+def cached_nvtx_map_has_embedded_tc(conn) -> bool:
+    """True when ``nvtx_kernel_map`` includes Tensor Core columns (``is_tc_eligible``, ``uses_tc``)."""
+    cached = _probe_cache_get(conn, "nvtx_embedded_tc")
+    if cached is not _PROBE_MISS:
+        return cached
+    try:
+        conn.execute("SELECT is_tc_eligible, uses_tc FROM nvtx_kernel_map LIMIT 0")
+        ok = True
+    except DB_ERRORS:
+        ok = False
+    _probe_cache_set(conn, "nvtx_embedded_tc", ok)
+    return ok
 
 
 @runtime_checkable
