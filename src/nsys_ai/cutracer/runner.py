@@ -23,6 +23,7 @@ Modal
 
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 from dataclasses import dataclass, field
@@ -134,12 +135,13 @@ def run_local(
         if progress:
             print("  (running in kernel launch logger mode — no .so available)")
 
-    result = subprocess.run(
-        argv,
-        shell=False,
-    )
+    run_env = os.environ.copy()
+    if config.max_iters is not None:
+        run_env["CUTRACER_MAX_ITERS"] = str(config.max_iters)
+
+    result = subprocess.run(argv, shell=False, env=run_env)
     if result.returncode != 0:
-        raise subprocess.CalledProcessError(result.returncode, argv[0])
+        raise subprocess.CalledProcessError(result.returncode, argv)
 
     return config.output_dir
 
@@ -313,26 +315,37 @@ def run_with_cutracer(
     so_path = str(INSTALL_DIR / "lib" / "cutracer.so")
     has_so = Path(so_path).is_file()
 
-    # Build cutracer trace command — launch_cmd split via shlex to handle quoted args
+    # Build cutracer trace command — launch_cmd split via shlex to handle quoted args.
+    # Without a .so, match local ``run_local`` logger mode: no --analysis / --output-dir.
     argv = ["cutracer", "trace"]
     if has_so:
         argv += ["--cutracer-so", so_path]
+        argv += ["--analysis", analysis]
+        if kernel_filter:
+            argv += ["--kernel-filters", kernel_filter]
+        argv += ["--output-dir", "/cutracer_out"]
     else:
         print(f"WARNING: cutracer.so not found at {{so_path}} — running in kernel logger mode only")
-    argv += ["--analysis", analysis]
-    if kernel_filter:
-        argv += ["--kernel-filters", kernel_filter]
-    argv += ["--output-dir", "/cutracer_out"]
+        if kernel_filter:
+            argv += ["--kernel-filters", kernel_filter]
     argv += ["--"] + shlex.split(launch_cmd)
 
     print("==> CUTracer run starting")
     print(f"    so      : {{so_path if has_so else '(not found)'}}")
-    print(f"    analysis: {{analysis}}")
-    print(f"    filter  : {{kernel_filter or '(all)'}}")
-    print(f"    output  : /cutracer_out")
+    if has_so:
+        print(f"    analysis: {{analysis}}")
+        print(f"    filter  : {{kernel_filter or '(all)'}}")
+        print(f"    output  : /cutracer_out")
+    else:
+        print("    mode    : kernel launch logger (no .so)")
+        print(f"    filter  : {{kernel_filter or '(all)'}}")
     print(f"    argv    : {{' '.join(argv)}}")
 
-    result = subprocess.run(argv, shell=False)
+    run_env = os.environ.copy()
+    if max_iters is not None:
+        run_env["CUTRACER_MAX_ITERS"] = str(max_iters)
+
+    result = subprocess.run(argv, shell=False, env=run_env)
     if result.returncode != 0:
         vol.commit()
         raise SystemExit(f"Training command exited with code {{result.returncode}}")

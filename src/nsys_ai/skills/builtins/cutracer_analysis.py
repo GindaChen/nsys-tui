@@ -68,14 +68,16 @@ def _execute(conn, **kwargs) -> list[dict]:
 
     # 5. Fetch per-kernel GPU time from nsys
     gpu_time_map: dict[str, float] = {}
+    total_gpu = 1.0
     try:
-        from nsys_ai.connection import wrap_connection
+        from nsys_ai.connection import is_safe_identifier, wrap_connection
 
         adapter = wrap_connection(conn)
         tables = adapter.get_table_names()
+        rows: list = []
         if "kernels" in tables:
             trim_clause = ""
-            params = []
+            params: list = []
             if has_trim:
                 trim_clause = 'WHERE start >= ? AND "end" <= ?'
                 params = [trim_start, trim_end]
@@ -87,9 +89,31 @@ def _execute(conn, **kwargs) -> list[dict]:
                 """,
                 params,
             ).fetchall()
+        else:
+            resolved = adapter.resolve_activity_tables()
+            kernel_table = resolved.get("kernel")
+            if kernel_table and is_safe_identifier(kernel_table):
+                trim_sql = ""
+                params = []
+                if has_trim:
+                    trim_sql = 'AND k.start >= ? AND k."end" <= ?'
+                    params = [trim_start, trim_end]
+                rows = adapter.execute(
+                    f"""
+                    SELECT COALESCE(d.value, s.value, 'kernel_' || CAST(k.shortName AS VARCHAR)) AS kernel_name,
+                           ROUND(SUM(k."end" - k.start) / 1e6, 3) AS total_ms
+                    FROM {kernel_table} k
+                    LEFT JOIN StringIds s ON k.shortName = s.id
+                    LEFT JOIN StringIds d ON k.demangledName = d.id
+                    WHERE 1=1 {trim_sql}
+                    GROUP BY COALESCE(d.value, s.value, 'kernel_' || CAST(k.shortName AS VARCHAR))
+                    """,
+                    params,
+                ).fetchall()
+        if rows:
             total_gpu = sum(r[1] for r in rows) or 1.0
-            for kernel_name, total_ms in rows:
-                gpu_time_map[kernel_name] = total_ms
+            for kernel_name, ms in rows:
+                gpu_time_map[kernel_name] = ms
     except Exception as exc:
         _log.debug("Failed to fetch per-kernel GPU time for cutracer_analysis: %s", exc)
         total_gpu = 1.0

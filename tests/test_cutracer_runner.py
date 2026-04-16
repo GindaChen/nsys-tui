@@ -173,6 +173,24 @@ class TestRunLocal:
                 # Logger mode: no --analysis flag
                 assert "--analysis" not in call_argv
 
+    def test_max_iters_sets_cutracer_env(self, tmp_path):
+        """CUTRACER_MAX_ITERS is passed when ``RunConfig.max_iters`` is set."""
+        from nsys_ai.cutracer.runner import RunConfig, run_local
+
+        so = tmp_path / "cutracer.so"
+        so.write_bytes(b"\x7fELF")
+        cfg = RunConfig(
+            launch_cmd="true",
+            output_dir=tmp_path / "out",
+            so_path=so,
+            max_iters=42,
+        )
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            run_local(cfg, progress=False)
+        env = mock_run.call_args.kwargs.get("env") or {}
+        assert env.get("CUTRACER_MAX_ITERS") == "42"
+
 
 # ---------------------------------------------------------------------------
 # format_modal_app
@@ -285,6 +303,7 @@ class TestFormatModalApp:
 
         plan, config = _make_plan_and_config(tmp_path)
         script = format_modal_app(plan, config)
+        assert "CUTRACER_MAX_ITERS" in script
         assert "5" in script  # max_iters=5
 
     def test_contains_vol_iterdir(self, tmp_path):

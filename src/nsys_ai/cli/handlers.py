@@ -67,38 +67,10 @@ def _cutracer_check():
 
 
 def _find_cutracer_so() -> str | None:
-    """Search for cutracer.so in well-known locations."""
-    import shutil
-    from pathlib import Path
+    """Search for cutracer.so using the same rules as ``cutracer install``."""
+    from nsys_ai.cutracer.installer import _find_cutracer_so_path
 
-    # 1. Explicit env var
-    env_path = os.environ.get("CUTRACER_SO")
-    if env_path and Path(env_path).is_file():
-        return env_path
-
-    # 2. nsys-ai managed install
-    managed = Path.home() / ".nsys-ai" / "cutracer" / "lib" / "cutracer.so"
-    if managed.is_file():
-        return str(managed)
-
-    # 3. Adjacent to cutracer Python package
-    try:
-        import cutracer as _ct  # type: ignore[import]
-        pkg_dir = Path(_ct.__file__).parent
-        candidate = pkg_dir / "lib" / "cutracer.so"
-        if candidate.is_file():
-            return str(candidate)
-    except ImportError:
-        pass
-
-    # 4. PATH-adjacent lib/
-    ct_bin = shutil.which("cutracer")
-    if ct_bin:
-        candidate = Path(ct_bin).parent.parent / "lib" / "cutracer.so"
-        if candidate.is_file():
-            return str(candidate)
-
-    return None
+    return _find_cutracer_so_path()
 
 
 def _cutracer_analyze(args, _profile):
