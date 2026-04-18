@@ -67,7 +67,7 @@ and `attribution.top_apis[].name`. Look for `DataLoader` / `cudaMemcpyAsync` /
 
 After delivery, suggest a second mode only if a distinct critical finding exists. Cap 2 chains.
 
-- Large idle gaps attributed to NVTX region → suggest **Mode 5** (layer attribution)
+- Large idle gaps align with a specific NVTX region in the timeline → suggest **Mode 5** (layer attribution)
 - `nccl.collectives > 0` AND idle gaps correlate with NCCL timeline → suggest **Mode 2**
 - Idle gap after step 0 only (JIT) → note: re-profile with `torch.cuda.nvtx.range` to verify
 
