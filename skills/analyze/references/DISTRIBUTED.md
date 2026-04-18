@@ -31,9 +31,12 @@ Step 1  Confirm NCCL activity + per-stream breakdown:
         GROUP BY k.streamId, op ORDER BY k.streamId, total_ms DESC LIMIT 20
 
 Step 2  Read overlap_pct and Overlap Matrix:
-        [Single profile] Use `get_gpu_overlap_stats` — returns per-GPU overlap_pct.
-                         Run `kernel_overlap_matrix` to identify EXACTLY which NCCL collective overlaps (or contends) with which compute/memcpy operation. This provides a pairwise matrix (e.g., Comm×Comm, Comm×Compute).
-        [Diff context]   Use `get_iteration_diff` — overlap_pct for before/after.
+        [Single profile — CLI] nsys-ai skill run overlap_breakdown <profile> --format json
+                               nsys-ai skill run kernel_overlap_matrix <profile> --format json
+                               → per-GPU overlap_pct + pairwise Comm×Compute matrix
+        [Diff context — CLI]   nsys-ai skill run overlap_breakdown before.sqlite --format json
+                               nsys-ai skill run overlap_breakdown after.sqlite --format json
+                               (`get_iteration_diff` is available in `nsys-ai diff --chat` only — Stage C2)
 
         overlap_pct = fraction of NCCL time that overlaps with compute kernels × 100
 
@@ -66,9 +69,11 @@ Step 3  Classify collective type + stream → infer parallelism strategy:
         Stream 37 shows AllReduce only → Stream 7 = PP, Stream 37 = DP.
 
 Step 4  Per-GPU imbalance diagnosis:
-        [Single profile] Use `get_gpu_overlap_stats` — compare compute_only_ms
-        across gpu_ids. If max/min ratio > 1.2, report GPU imbalance.
-        [Diff context]   Use `get_gpu_imbalance_stats(iteration_index=<N>)`
+        [Single profile — CLI] nsys-ai skill run overlap_breakdown <profile> --format json -p device=<N>
+                               Compare compute_only_ms across gpu_ids. If max/min ratio > 1.2, report GPU imbalance.
+        [Diff context — CLI]   nsys-ai skill run overlap_breakdown before.sqlite --format json
+                               nsys-ai skill run overlap_breakdown after.sqlite --format json
+                               (`get_gpu_imbalance_stats` is available in `nsys-ai diff --chat` only — Stage C2)
         → Per-GPU: {compute_ms, nccl_ms, idle_ms} for both profiles
 
         Diagnose:

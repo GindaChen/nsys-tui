@@ -42,8 +42,13 @@ Step 2  Classify the variance pattern:
         └────────────────────────────────────────┴──────────────────────────────────────────┘
 
 Step 3  Zoom into one slow iteration to confirm:
-        [Use navigate tools to get to the slow iteration window]
+        [CLI — preferred for Claude Code plugin]
+        nsys-ai skill run iteration_detail <profile> --format json -p iteration=<slow iter index>
+        or: nsys-ai skill run top_kernels <profile> --format json --iteration <slow iter index>
+
+        [Interactive UI/tooling only — not available from plugin today]
         `fit_nvtx_range`(nvtx_name="<iteration name>", occurrence_index=<slow iter index>)
+        (This is a navigate/UI tool; use the CLI alternatives above in the Claude Code plugin.)
 
         Query kernels in that window:
         SELECT s.value AS name, COUNT(*) AS cnt, SUM([end]-start)/1e6 AS ms

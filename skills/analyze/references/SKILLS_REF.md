@@ -3,7 +3,7 @@
 **Always start with**: `profile_health_manifest` (one-shot triage, ~2 s, returns everything)
 
 **Token budget**: add `--max-rows N` to limit JSON output size.
-Default cap: 50 rows. Use 10–20 for large profiles.
+No default row cap is applied; use `--max-rows` explicitly if you want to truncate output. For large profiles, 10–20 rows is often a good starting point.
 
 **Trim**: add `--trim START_S END_S` or `--iteration N` to all skills.
 

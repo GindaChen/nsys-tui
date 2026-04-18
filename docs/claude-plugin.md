@@ -31,7 +31,7 @@ pip install "nsys-ai[agent]"
 git clone https://github.com/GindaChen/nsys-ai ~/.claude/skills/nsys-ai
 ```
 
-See [QUICKSTART.md](QUICKSTART.md) for a 2-minute walkthrough.
+See [claude-plugin-quickstart.md](claude-plugin-quickstart.md) for a 2-minute walkthrough.
 
 ## Usage
 
@@ -55,7 +55,7 @@ skills/analyze/
   SKILL.md              ← main skill instructions (Claude reads this)
   references/
     PRINCIPLES.md       ← non-negotiable analysis rules
-    TRIAGE.md           ← 6-stage triage workflow
+    M1_AUTO.md          ← 6-stage triage workflow
     DISTRIBUTED.md      ← NCCL / multi-GPU analysis
     DIFF.md             ← regression comparison workflow
     MFU.md              ← MFU / efficiency workflow

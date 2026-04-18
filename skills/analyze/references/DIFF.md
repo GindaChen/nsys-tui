@@ -28,8 +28,13 @@ You have access to before/after SQLite profiles and MUST use the following rules
 > **PhD-student reality**: They changed something (batch size, seq len, framework version)
 > and it's now slower. They want WHY and HOW TO FIX IT, not just where.
 
+**Note**: Steps below use tool-call names (`get_iteration_boundaries`, etc.) available in
+the `nsys-ai diff --chat` interactive interface (Stage C2). For the Claude Code plugin
+today, use the CLI equivalents shown in brackets.
+
 ```
-Step 1  Use `get_iteration_boundaries`
+Step 1  [CLI] nsys-ai skill run iteration_timing before.sqlite --format json
+        [CLI] nsys-ai skill run iteration_timing after.sqlite --format json
         → {is_aligned, iteration_count_before, iteration_count_after, boundaries}
 
         DECIDE STRATEGY based on what you get:
@@ -50,7 +55,9 @@ Step 2  Use `get_top_nvtx_diffs` (limit=20)
         • NCCL delta large                      → communication change → read skills/distributed.md
         • Many small changes, no dominant delta → broad config change (batch size, seq len)
 
-Step 3  Use `get_iteration_diff` (for stable N, not 0)
+Step 3  [CLI] nsys-ai skill run iteration_detail before.sqlite --format json -p iteration=<N>
+        [CLI] nsys-ai skill run iteration_detail after.sqlite --format json -p iteration=<N>
+        (`get_iteration_diff` is available in `nsys-ai diff --chat` — Stage C2 only)
         KEY SIGNALS:
         ┌────────────────────────────────────────┬────────────────────────────────────────┐
         │ Signal                                 │ Diagnosis                              │
@@ -71,8 +78,10 @@ Step 4  [If specific kernel/region changed] Micro-drill:
         → region-level wall_clock_ms, top_regressions, classification
         Ask user: "Did you change anything related to <regressed region>?"
 
-Step 5  [If NCCL regressed] read skills/distributed.md
-        Then: Use `get_gpu_imbalance_stats`(iteration_index=<N>)
+Step 5  [If NCCL regressed] read DISTRIBUTED.md
+        [CLI] nsys-ai skill run overlap_breakdown before.sqlite --format json
+        [CLI] nsys-ai skill run overlap_breakdown after.sqlite --format json
+        (`get_gpu_imbalance_stats` is available in `nsys-ai diff --chat` — Stage C2 only)
         Ask: "Did you change the number of GPUs, parallelism strategy, or network config?"
 
 Step 6  [Optional deep-dive tools]
@@ -97,16 +106,20 @@ Step 7  REQUIRED final statement:
 *Only when user explicitly asks about efficiency delta — do not proactively offer.*
 
 ```
-Step 1  Use `get_iteration_boundaries` → pick stable iteration (not index 0)
-Step 2  Use `get_iteration_diff`(iteration_index=<N>)
-        → step_time_before_s = wall_clock_ms.before / 1000
-           step_time_after_s  = wall_clock_ms.after  / 1000
-Step 3  Use `get_gpu_peak_tflops`
-Step 4  Resolve model architecture: use lookup table in skills/mfu.md first
-Step 5  Use `compute_theoretical_flops`(operation="full_model", multiplier=<3 or 4>, ...)
-Step 6  Use `compute_mfu` for both before and after profiles
+Step 1  [CLI] nsys-ai skill run iteration_timing before.sqlite --format json
+        [CLI] nsys-ai skill run iteration_timing after.sqlite --format json
+        → pick stable iteration (not index 0)
+Step 2  [CLI] nsys-ai skill run iteration_detail before.sqlite --format json -p iteration=<N>
+        [CLI] nsys-ai skill run iteration_detail after.sqlite --format json -p iteration=<N>
+        → step_time_before_s, step_time_after_s (divide ms by 1000)
+Step 3  GPU peak TFLOPS: auto-detected by `region_mfu`. Read `gpu` field from manifest; if unknown ask user for `-p peak_tflops=<value>`.
+Step 4  Resolve model architecture: use lookup table in MFU.md first
+Step 5  [CLI] nsys-ai skill run theoretical_flops before.sqlite --format json \
+            -p operation=full_model -p multiplier=<3 or 4> -p hidden_dim=H ...
+Step 6  [CLI] nsys-ai skill run region_mfu before.sqlite --format json -p name=<step_region> ...
+        [CLI] nsys-ai skill run region_mfu after.sqlite --format json -p name=<step_region> ...
         Report: "MFU: before 35% → after 51% (+16pp)"
-        Contextualise using reference ranges in skills/mfu.md Workflow 2 Step 6.
+        Contextualise using reference ranges in MFU.md Workflow 2 Step 6.
 ```
 
 ---

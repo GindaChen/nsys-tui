@@ -63,7 +63,7 @@ If returns patterns, re-route via §4 keyword logic. If still empty, offer menu 
 ### 3.3 Device propagation
 
 If §2.2 auto-retry selected device N, every subsequent skill in the drill-down that accepts
-device must receive `-p device=N`. See PRINCIPLES.md §6 for the 11 / 12 / 10 partition.
+device must receive `-p device=N`. See PRINCIPLES.md §6 for the 13 / 1 / 9 / 10 partition.
 
 ---
 
@@ -138,8 +138,9 @@ in its stdout; `src/nsys_ai/web.py:674` hard-codes `127.0.0.1`, not `localhost`)
 
 > "Timeline ready at http://127.0.0.1:PORT — open in browser to see findings overlay."
 
-**WSL2**: browser does NOT auto-open. Always print the URL. Use `localhost` interchangeably
-with `127.0.0.1` — both reach the same server.
+**WSL2**: browser does NOT auto-open. Always print the exact URL emitted by `timeline-web`
+(typically `http://127.0.0.1:PORT`) — do not substitute `localhost` (on some systems it
+resolves to IPv6 ::1 and won't reach the server).
 
 **Fail-soft**: if `evidence build` produces empty `{"findings": []}`, still run `timeline-web`.
 Never block delivery on evidence failure.

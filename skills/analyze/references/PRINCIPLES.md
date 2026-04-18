@@ -99,10 +99,10 @@ nsys-ai evidence build <profile> --format json -o /tmp/findings.json
 nsys-ai timeline-web <profile> --findings /tmp/findings.json
 ```
 
-Then tell the user:
-> "Timeline ready at http://localhost:PORT — open in browser to see findings overlay."
+Then tell the user the exact URL emitted by `timeline-web` (look for `http://127.0.0.1:PORT` in its stdout):
+> "Timeline ready at http://127.0.0.1:PORT — open in browser to see findings overlay."
 
-**WSL2**: browser does NOT auto-open. Always print the URL.
+**WSL2**: browser does NOT auto-open. Always print the exact URL emitted by `timeline-web` — do not substitute `localhost` (on some systems it resolves to IPv6 ::1 and won't reach the server).
 
 ### §5.2 Mode-specific findings override (optional)
 
@@ -143,18 +143,22 @@ supplies from manifest: `gpu` = first device in `overlap.available_devices` or 0
 When Mode 1's §2.2 auto-retry picks device N, or when any mode filters per device, pass
 `-p device=N`. Not all 33 skills accept it. Verified against `src/nsys_ai/skills/builtins/`.
 
-### §6.1 Accepts `-p device=N` (11 skills)
+### §6.1 Accepts `-p device=N` (13 skills)
 
 `profile_health_manifest`, `overlap_breakdown`, `nccl_breakdown`,
 `nccl_communicator_analysis`, `kernel_overlap_matrix`, `memory_bandwidth`,
-`iteration_timing`, `iteration_detail`, `arithmetic_intensity`, `region_mfu`,
-`stream_concurrency`.
+`iteration_timing`, `iteration_detail`, `arithmetic_intensity`,
+`gpu_idle_gaps`, `kernel_instances`, `h2d_distribution`, `root_cause_matcher`.
 
-### §6.2 Does NOT accept device — use `--iteration N` or `--trim` (12 skills)
+### §6.1a Accepts `-p device_id=N` (1 skill)
+
+`region_mfu` — uses `device_id` (not `device`) as the parameter name.
+
+### §6.2 Does NOT accept device — use `--iteration N` or `--trim` (9 skills)
 
 `top_kernels`, `tensor_core_usage`, `kernel_launch_overhead`, `cpu_gpu_pipeline`,
-`gpu_idle_gaps`, `sync_cost_analysis`, `kernel_instances`, `nvtx_layer_breakdown`,
-`nvtx_kernel_map`, `memory_transfers`, `h2d_distribution`, `root_cause_matcher`.
+`sync_cost_analysis`, `nvtx_layer_breakdown`, `nvtx_kernel_map`,
+`memory_transfers`, `stream_concurrency`.
 
 ### §6.3 Not device-scoped (10 skills)
 
@@ -231,7 +235,7 @@ After any mode completes, verify:
 - [ ] File:line fix when local source code accessible
 - [ ] No `SELECT *` used
 - [ ] Time values converted from ns (÷ 1e6 ms, ÷ 1e9 s)
-- [ ] §5 evidence step ran; `localhost:PORT` URL printed
+- [ ] §5 evidence step ran; `http://127.0.0.1:PORT` URL printed
 
 ---
 
