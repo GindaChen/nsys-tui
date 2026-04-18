@@ -49,11 +49,11 @@ Otherwise, render the menu **once per session**:
 What would you like to analyze?
 
   1. Auto triage      — not sure where to start                  [default]
-  2. Comms            — NCCL / overlap / multi-GPU               (coming Stage B1)
+  2. Comms            — NCCL / overlap / multi-GPU
   3. Compute          — top kernels / tensor core / MFU          (coming Stage B2)
   4. Memory           — H2D / D2H / bandwidth                    (coming Stage B2)
   5. NVTX / code map  — which layer / step consumes time         (coming Stage B2)
-  6. Idle / sync      — GPU gaps, CPU stalls, launch overhead    (coming Stage B1)
+  6. Idle / sync      — GPU gaps, CPU stalls, launch overhead
   7. CUTracer         — SASS-level (requires re-run)             (coming Stage C1)
   8. Diff             — compare two profiles                     (coming Stage C2)
   9. Variance         — some iterations much slower than others  (coming Stage C2)
@@ -98,11 +98,11 @@ through to Mode 1 with a one-line notice:
 | Mode | Reference | Fallback ref (today) | Status |
 |------|-----------|----------------------|--------|
 | 1 Auto | `references/M1_AUTO.md` | — | Stage A (live) |
-| 2 Comms | `references/M2_COMMS.md` *(not yet present)* | `references/DISTRIBUTED.md` | Stage B1 planned |
+| 2 Comms | `references/M2_COMMS.md` | `references/DISTRIBUTED.md` (deeper topology ref) | Stage B1 (live) |
 | 3 Compute | `references/M3_COMPUTE.md` *(not yet present)* | `references/MFU.md` | Stage B2 planned |
 | 4 Memory | `references/M4_MEMORY.md` *(not yet present)* | — (use Mode 1 auto-triage) | Stage B2 planned |
 | 5 NVTX | `references/M5_NVTX.md` *(not yet present)* | — (use Mode 1 auto-triage) | Stage B2 planned |
-| 6 Idle | `references/M6_IDLE.md` *(not yet present)* | — (use Mode 1 auto-triage) | Stage B1 planned |
+| 6 Idle | `references/M6_IDLE.md` | — | Stage B1 (live) |
 | 7 CUTracer | `references/M7_CUTRACER.md` *(not yet present)* | — (use Mode 1 auto-triage) | Stage C1 planned |
 | 8 Diff | `references/M8_DIFF.md` *(not yet present)* | `references/DIFF.md` | Stage C2 planned |
 | 9 Variance | `references/M9_VARIANCE.md` *(not yet present)* | `references/VARIANCE.md` | Stage C2 planned |
