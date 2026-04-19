@@ -2,26 +2,30 @@
 # Smoke test for nsys-ai plugin — validates that every CLI command referenced
 # in skills/analyze/SKILL.md + M*.md still works with the installed nsys-ai version.
 #
-# Usage:  ./scripts/smoke_test.sh <profile.sqlite>
+# Usage:  ./scripts/smoke_test.sh <profile.sqlite> [nvtx-profile.sqlite]
+#   profile.sqlite      — any GPU profile (NCCL preferred for Mode 2 coverage)
+#   nvtx-profile.sqlite — profile with NVTX_EVENTS; enables Mode 5 skill checks
+#                         (optional; NVTX skills SKIP when omitted)
 # Exit 0 if all checks succeed, non-zero otherwise.
 #
-# Stage A: Mode 1 end-to-end (manifest → evidence → timeline surface check)
-# Stage B1: Mode 2 + Mode 6 drill-down skills
+# Stage A:  Mode 1 end-to-end (manifest → evidence → timeline surface check)
+# Stage B1: Mode 2 + Mode 6 drill-down skills + field-shape validation
 # Stage B2: Mode 3, Mode 4, Mode 5 drill-down skills + field-shape validation
 
 set -euo pipefail
 
 PROFILE="${1:-}"
 if [[ -z "$PROFILE" || ! -f "$PROFILE" ]]; then
-  echo "usage: $0 <profile.sqlite>" >&2
+  echo "usage: $0 <profile.sqlite> [nvtx-profile.sqlite]" >&2
   exit 2
 fi
+NVTX_PROFILE="${2:-$PROFILE}"
 
 FAIL=0
 
 run() {
   local label="$1"; shift
-  printf "  %-50s " "$label"
+  printf "  %-55s " "$label"
   if "$@" >/dev/null 2>&1; then
     echo "OK"
   else
@@ -33,7 +37,7 @@ run() {
 run_capture() {
   local label="$1"; shift
   local out="$1"; shift
-  printf "  %-50s " "$label"
+  printf "  %-55s " "$label"
   if "$@" >"$out" 2>/dev/null; then
     echo "OK"
   else
@@ -44,7 +48,7 @@ run_capture() {
 
 check_regex() {
   local label="$1"; local file="$2"; local pattern="$3"
-  printf "  %-50s " "$label"
+  printf "  %-55s " "$label"
   if grep -qE "$pattern" "$file" 2>/dev/null; then
     echo "OK"
   else
@@ -57,7 +61,7 @@ check_json_key() {
   # Verify a key path exists and is non-null in a JSON file.
   # key_path uses dot notation: e.g. "nccl.collectives" or "idle.idle_pct"
   local label="$1"; local file="$2"; local key_path="$3"
-  printf "  %-50s " "$label"
+  printf "  %-55s " "$label"
   local py_expr
   py_expr="import json,sys; d=json.load(open('$file')); d=d[0] if isinstance(d,list) else d"
   for part in ${key_path//./ }; do
@@ -72,23 +76,83 @@ check_json_key() {
   fi
 }
 
-# Detect profile capabilities once upfront
-HAS_NVTX=$(sqlite3 "$PROFILE" "SELECT COUNT(*) FROM sqlite_master WHERE name='NVTX_EVENTS';" 2>/dev/null || echo 0)
-HAS_NCCL=$(sqlite3 "$PROFILE" "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL';" 2>/dev/null || echo 0)
+check_field_conditional() {
+  # Run check_regex but SKIP when JSON has no real data rows.
+  # Skips rows with: empty list, _metadata, _summary, _diagnostic, or top-level 'error' key.
+  local label="$1"; local file="$2"; local pattern="$3"; local skip_msg="$4"
+  printf "  %-55s " "$label"
+  EMPTY=$(python3 -c "
+import json, sys
+try:
+    d = json.load(open('$file'))
+    rows = d if isinstance(d, list) else [d]
+    data = [r for r in rows if not r.get('_metadata') and not r.get('_summary')
+            and not r.get('_diagnostic') and 'error' not in r]
+    print('yes' if not data else 'no')
+except Exception:
+    print('yes')
+" 2>/dev/null || echo "yes")
+  if [[ "$EMPTY" == "yes" ]]; then
+    echo "SKIP ($skip_msg)"
+  elif grep -qE "$pattern" "$file" 2>/dev/null; then
+    echo "OK"
+  else
+    echo "FAIL (pattern /$pattern/ not found)"
+    FAIL=$((FAIL+1))
+  fi
+}
 
+# ── Profile capability detection ──────────────────────────────────────────────
+# Use the skill itself to probe NVTX — sqlite3 can't read DuckDB parquet caches.
+NVTX_PROBE_OUT="$(mktemp)"
+nsys-ai skill run nvtx_layer_breakdown "$NVTX_PROFILE" --format json --max-rows 1 \
+  >"$NVTX_PROBE_OUT" 2>/dev/null || true
+# Detection succeeds when either real region rows or a _detection_meta row with layer_names exists
+HAS_NVTX=$(python3 -c "
+import json
+d = json.load(open('$NVTX_PROBE_OUT'))
+has_regions = any('nvtx_region' in r for r in d)
+has_meta = any(r.get('_detection_meta') and r.get('layer_names') for r in d)
+print('1' if (has_regions or has_meta) else '0')
+" 2>/dev/null || echo 0)
+NVTX_ROWS="$HAS_NVTX"
+
+# Temp files
 MANIFEST_OUT="$(mktemp)"
-ITER_OUT="$(mktemp)"
+OVL_OUT="$(mktemp)"
+NCCL_BD_OUT="$(mktemp)"
+NCCL_AN_OUT="$(mktemp)"
+NCCL_COMM_OUT="$(mktemp)"
 TC_OUT="$(mktemp)"
+TK_OUT="$(mktemp)"
+KLP_OUT="$(mktemp)"
+AI_OUT="$(mktemp)"
+MEM_BW_OUT="$(mktemp)"
 MEM_XFER_OUT="$(mktemp)"
 H2D_OUT="$(mktemp)"
-trap 'rm -f "$MANIFEST_OUT" "$ITER_OUT" "$TC_OUT" "$MEM_XFER_OUT" "$H2D_OUT" /tmp/findings_smoke.json' EXIT
+GAPS_OUT="$(mktemp)"
+SYNC_OUT="$(mktemp)"
+CPU_GPU_OUT="$(mktemp)"
+ITER_OUT="$(mktemp)"
+NLB_OUT="$(mktemp)"
+NKM_OUT="$(mktemp)"
+SE_OUT="$(mktemp)"
+_cleanup() {
+  rm -f "$MANIFEST_OUT" "$OVL_OUT" "$NCCL_BD_OUT" "$NCCL_AN_OUT" "$NCCL_COMM_OUT" \
+        "$TC_OUT" "$TK_OUT" "$KLP_OUT" "$AI_OUT" \
+        "$MEM_BW_OUT" "$MEM_XFER_OUT" "$H2D_OUT" \
+        "$GAPS_OUT" "$SYNC_OUT" "$CPU_GPU_OUT" \
+        "$ITER_OUT" "$NLB_OUT" "$NKM_OUT" "$SE_OUT" "$NVTX_PROBE_OUT" \
+        /tmp/findings_smoke.json
+}
+trap _cleanup EXIT
 
 # ── Top-level ─────────────────────────────────────────────────────────────────
 echo "== Top-level commands =="
 run "nsys-ai --help"             nsys-ai --help
 run "nsys-ai skill list"         nsys-ai skill list
 run "schema_inspect"             nsys-ai skill run schema_inspect "$PROFILE" --format json
-printf "  %-50s " "cutracer check (info)"
+printf "  %-55s " "cutracer check (info)"
 if nsys-ai cutracer check >/dev/null 2>&1; then
   echo "OK (.so installed)"
 else
@@ -99,18 +163,26 @@ fi
 echo "== Mode 1 — profile_health_manifest + field validation =="
 run_capture "profile_health_manifest" "$MANIFEST_OUT" \
   nsys-ai skill run profile_health_manifest "$PROFILE" --format json
-check_regex  "  manifest: gpu field"              "$MANIFEST_OUT" '"gpu"'
-check_regex  "  manifest: profile_span_ms"        "$MANIFEST_OUT" '"profile_span_ms"'
-check_regex  "  manifest: suspected_bottleneck"   "$MANIFEST_OUT" '"suspected_bottleneck"'
-check_json_key "  manifest: nccl.collectives"     "$MANIFEST_OUT" "nccl.collectives"
-check_json_key "  manifest: idle.idle_pct"        "$MANIFEST_OUT" "idle.idle_pct"
-# overlap.overlap_pct only present when device 0 has kernels; skip if overlap.error exists
-printf "  %-50s " "  manifest: overlap.overlap_pct"
-OVERLAP_ERR=$(python3 -c "import json; d=json.load(open('$MANIFEST_OUT')); d=d[0] if isinstance(d,list) else d; print('yes' if 'error' in d.get('overlap',{}) else 'no')" 2>/dev/null || echo "no")
+check_regex    "  manifest: gpu field"              "$MANIFEST_OUT" '"gpu"'
+check_regex    "  manifest: profile_span_ms"        "$MANIFEST_OUT" '"profile_span_ms"'
+check_regex    "  manifest: suspected_bottleneck"   "$MANIFEST_OUT" '"suspected_bottleneck"'
+check_json_key "  manifest: nccl.collectives"       "$MANIFEST_OUT" "nccl.collectives"
+check_json_key "  manifest: idle.idle_pct"          "$MANIFEST_OUT" "idle.idle_pct"
+# overlap.overlap_pct absent when device 0 has no kernels (overlap.error present instead)
+printf "  %-55s " "  manifest: overlap.overlap_pct"
+OVERLAP_ERR=$(python3 -c "
+import json; d=json.load(open('$MANIFEST_OUT'))
+d=d[0] if isinstance(d,list) else d
+print('yes' if 'error' in d.get('overlap',{}) else 'no')
+" 2>/dev/null || echo "no")
 if [[ "$OVERLAP_ERR" == "yes" ]]; then
   echo "SKIP (device 0 empty — overlap.error present; auto-retry needed)"
 else
-  if python3 -c "import json,sys; d=json.load(open('$MANIFEST_OUT')); d=d[0] if isinstance(d,list) else d; assert d['overlap']['overlap_pct'] is not None" 2>/dev/null; then
+  if python3 -c "
+import json,sys; d=json.load(open('$MANIFEST_OUT'))
+d=d[0] if isinstance(d,list) else d
+assert d['overlap']['overlap_pct'] is not None
+" 2>/dev/null; then
     echo "OK"
   else
     echo "FAIL (key overlap.overlap_pct missing or null)"
@@ -118,42 +190,109 @@ else
   fi
 fi
 run "root_cause_matcher"         nsys-ai skill run root_cause_matcher "$PROFILE" --format json
-if [[ "$HAS_NVTX" -gt 0 ]]; then
-  run "nvtx_layer_breakdown"     nsys-ai skill run nvtx_layer_breakdown "$PROFILE" --format json --max-rows 1
+if [[ "$HAS_NVTX" -gt 0 && "$NVTX_ROWS" -gt 0 ]]; then
+  run "nvtx_layer_breakdown (probe)" nsys-ai skill run nvtx_layer_breakdown "$NVTX_PROFILE" --format json --max-rows 1
 else
-  printf "  %-50s " "nvtx_layer_breakdown"; echo "SKIP (no NVTX_EVENTS)"
+  printf "  %-55s " "nvtx_layer_breakdown (probe)"; echo "SKIP (no NVTX_EVENTS)"
 fi
 
 # ── Mode 2: comms ─────────────────────────────────────────────────────────────
 echo "== Mode 2 — comms (NCCL / overlap) =="
-run "overlap_breakdown"          nsys-ai skill run overlap_breakdown "$PROFILE" --format json
-run "nccl_breakdown"             nsys-ai skill run nccl_breakdown "$PROFILE" --format json
+run_capture "overlap_breakdown" "$OVL_OUT" \
+  nsys-ai skill run overlap_breakdown "$PROFILE" --format json
+# overlap_pct absent when device 0 has no kernels (error key present instead)
+OVL_ERR=$(python3 -c "
+import json; d=json.load(open('$OVL_OUT'))
+d=d[0] if isinstance(d,list) else d
+print('yes' if 'error' in d else 'no')
+" 2>/dev/null || echo "no")
+printf "  %-55s " "  overlap_breakdown: overlap_pct field"
+if [[ "$OVL_ERR" == "yes" ]]; then
+  echo "SKIP (device error — no overlap data on device 0)"
+else
+  if grep -qE '"overlap_pct"' "$OVL_OUT" 2>/dev/null; then echo "OK"
+  else echo "FAIL (overlap_pct missing)"; FAIL=$((FAIL+1)); fi
+fi
+
+run_capture "nccl_breakdown" "$NCCL_BD_OUT" \
+  nsys-ai skill run nccl_breakdown "$PROFILE" --format json
+check_field_conditional \
+  "  nccl_breakdown: total_ms field" "$NCCL_BD_OUT" '"total_ms"' "no NCCL data on this profile"
+
 run "kernel_overlap_matrix"      nsys-ai skill run kernel_overlap_matrix "$PROFILE" --format json
-run "nccl_anomaly"               nsys-ai skill run nccl_anomaly "$PROFILE" --format json -p threshold=3.0
+
+run_capture "nccl_anomaly" "$NCCL_AN_OUT" \
+  nsys-ai skill run nccl_anomaly "$PROFILE" --format json -p threshold=3.0
+check_field_conditional \
+  "  nccl_anomaly: ratio_to_avg field" "$NCCL_AN_OUT" '"ratio_to_avg"' "no anomalies detected"
+
+run_capture "nccl_communicator_analysis" "$NCCL_COMM_OUT" \
+  nsys-ai skill run nccl_communicator_analysis "$PROFILE" --format json
+check_field_conditional \
+  "  nccl_communicator_analysis: communicator_id" "$NCCL_COMM_OUT" '"communicator_id"' \
+  "no communicator blobs (re-export with --include-blobs=true)"
 
 # ── Mode 3: compute ───────────────────────────────────────────────────────────
 echo "== Mode 3 — compute (kernels / tensor core / MFU) =="
 run_capture "tensor_core_usage" "$TC_OUT" \
   nsys-ai skill run tensor_core_usage "$PROFILE" --format json
-check_regex "  tensor_core_usage: tc_achieved_pct field" "$TC_OUT" '"tc_achieved_pct"'
-run "top_kernels"                nsys-ai skill run top_kernels "$PROFILE" --format json --max-rows 5
-run "kernel_instances (longest)" nsys-ai skill run kernel_instances "$PROFILE" --format json --max-rows 3
-run "kernel_launch_pattern"      nsys-ai skill run kernel_launch_pattern "$PROFILE" --format json
+check_regex "  tensor_core_usage: tc_achieved_pct" "$TC_OUT" '"tc_achieved_pct"'
+
+run_capture "top_kernels" "$TK_OUT" \
+  nsys-ai skill run top_kernels "$PROFILE" --format json --max-rows 5
+check_regex "  top_kernels: total_ms field"        "$TK_OUT" '"total_ms"'
+
+# kernel_instances: default (longest) + specific-kernel sub-focus
+run "kernel_instances (longest)"  nsys-ai skill run kernel_instances "$PROFILE" --format json --max-rows 3
+KERNEL_NAME=$(python3 -c "
+import json
+d = json.load(open('$TK_OUT'))
+if d: print(d[0]['kernel_name'])
+" 2>/dev/null || echo "")
+printf "  %-55s " "kernel_instances (by name)"
+if [[ -n "$KERNEL_NAME" ]]; then
+  if nsys-ai skill run kernel_instances "$PROFILE" --format json -p name="$KERNEL_NAME" --max-rows 3 >/dev/null 2>&1; then
+    echo "OK"
+  else
+    echo "FAIL"
+    FAIL=$((FAIL+1))
+  fi
+else
+  echo "SKIP (no kernel name from top_kernels)"
+fi
+
+run_capture "kernel_launch_pattern" "$KLP_OUT" \
+  nsys-ai skill run kernel_launch_pattern "$PROFILE" --format json
+check_regex "  kernel_launch_pattern: sync_stalls"  "$KLP_OUT" '"sync_stalls"'
+
 # arithmetic_intensity requires theoretical_flops — use a sentinel value (1e12 FLOPs)
-run "arithmetic_intensity"       nsys-ai skill run arithmetic_intensity "$PROFILE" --format json \
+run_capture "arithmetic_intensity" "$AI_OUT" \
+  nsys-ai skill run arithmetic_intensity "$PROFILE" --format json \
   -p theoretical_flops=1000000000000
+check_field_conditional \
+  "  arithmetic_intensity: classification" "$AI_OUT" '"classification"' \
+  "GPU not in hardware specs — roofline unavailable"
 
 # ── Mode 4: memory ────────────────────────────────────────────────────────────
 echo "== Mode 4 — memory (H2D / D2H / bandwidth) =="
-run "memory_bandwidth"           nsys-ai skill run memory_bandwidth "$PROFILE" --format json
+run_capture "memory_bandwidth" "$MEM_BW_OUT" \
+  nsys-ai skill run memory_bandwidth "$PROFILE" --format json
+check_field_conditional \
+  "  memory_bandwidth: avg_bandwidth_gbps" "$MEM_BW_OUT" '"avg_bandwidth_gbps"' \
+  "no CUDA memory copies in this profile"
+
 run_capture "memory_transfers" "$MEM_XFER_OUT" \
   nsys-ai skill run memory_transfers "$PROFILE" --format json
-check_regex "  memory_transfers: total_ms field" "$MEM_XFER_OUT" '"total_ms"'
+check_regex "  memory_transfers: total_ms field"   "$MEM_XFER_OUT" '"total_ms"'
+
 run_capture "h2d_distribution" "$H2D_OUT" \
   nsys-ai skill run h2d_distribution "$PROFILE" --format json
-# h2d_distribution appends pattern metadata only when H2D transfers exist
-printf "  %-50s " "  h2d_distribution: pattern type"
-H2D_NONEMPTY=$(python3 -c "import json; d=json.load(open('$H2D_OUT')); print('yes' if d else 'no')" 2>/dev/null || echo "no")
+# pattern metadata row only appended when H2D data rows exist
+printf "  %-55s " "  h2d_distribution: pattern type"
+H2D_NONEMPTY=$(python3 -c "
+import json; d=json.load(open('$H2D_OUT'))
+print('yes' if d else 'no')
+" 2>/dev/null || echo "no")
 if [[ "$H2D_NONEMPTY" == "no" ]]; then
   echo "SKIP (no H2D transfers in this profile)"
 else
@@ -165,17 +304,34 @@ else
   fi
 fi
 
-# ── Mode 5: code mapping ──────────────────────────────────────────────────────
+# ── Mode 5: NVTX / code mapping ──────────────────────────────────────────────
 echo "== Mode 5 — NVTX / code mapping =="
 run_capture "iteration_timing" "$ITER_OUT" \
-  nsys-ai skill run iteration_timing "$PROFILE" --format json
-if [[ "$HAS_NVTX" -gt 0 ]]; then
-  run "nvtx_kernel_map"          nsys-ai skill run nvtx_kernel_map "$PROFILE" --format json --max-rows 5
+  nsys-ai skill run iteration_timing "$NVTX_PROFILE" --format json
+check_field_conditional \
+  "  iteration_timing: duration_ms field" "$ITER_OUT" '"duration_ms"' \
+  "no iterations detected"
+
+if [[ "$HAS_NVTX" -gt 0 && "$NVTX_ROWS" -gt 0 ]]; then
+  run_capture "nvtx_layer_breakdown" "$NLB_OUT" \
+    nsys-ai skill run nvtx_layer_breakdown "$NVTX_PROFILE" --format json --max-rows 20
+  check_field_conditional \
+    "  nvtx_layer_breakdown: total_gpu_ms"  "$NLB_OUT" '"total_gpu_ms"' "no NVTX regions found"
+  check_field_conditional \
+    "  nvtx_layer_breakdown: tc_achieved_pct" "$NLB_OUT" '"tc_achieved_pct"' "no NVTX regions found"
+
+  run_capture "nvtx_kernel_map" "$NKM_OUT" \
+    nsys-ai skill run nvtx_kernel_map "$NVTX_PROFILE" --format json --max-rows 5
+  check_field_conditional \
+    "  nvtx_kernel_map: kernel_name field"  "$NKM_OUT" '"kernel_name"' "no NVTX→kernel mappings"
+
   # iteration_detail: use iteration=1 (safe default)
-  run "iteration_detail iter=1"  nsys-ai skill run iteration_detail "$PROFILE" --format json -p iteration=1
-  # speedup_estimator: extract median_ms from iteration_timing output if available
+  run "iteration_detail iter=1" \
+    nsys-ai skill run iteration_detail "$NVTX_PROFILE" --format json -p iteration=1
+
+  # speedup_estimator: extract median_ms from iteration_timing
   ITER_MS=$(python3 -c "
-import json, sys
+import json
 rows=[r for r in json.load(open('$ITER_OUT')) if 'duration_ms' in r]
 if rows:
     durs=[r['duration_ms'] for r in rows]
@@ -183,34 +339,68 @@ if rows:
 else:
     print(100)
 " 2>/dev/null || echo 100)
-  run "speedup_estimator"        nsys-ai skill run speedup_estimator "$PROFILE" --format json \
+  run_capture "speedup_estimator" "$SE_OUT" \
+    nsys-ai skill run speedup_estimator "$NVTX_PROFILE" --format json \
     -p iteration_ms="$ITER_MS"
+  check_field_conditional \
+    "  speedup_estimator: speedup field"    "$SE_OUT" '"speedup"' "no speedup opportunities found"
 else
-  printf "  %-50s " "nvtx_kernel_map";        echo "SKIP (no NVTX_EVENTS)"
-  printf "  %-50s " "iteration_detail iter=1"; echo "SKIP (no NVTX_EVENTS)"
-  printf "  %-50s " "speedup_estimator";       echo "SKIP (no NVTX_EVENTS)"
+  printf "  %-55s " "nvtx_layer_breakdown";   echo "SKIP (no NVTX_EVENTS — pass nvtx-profile as \$2)"
+  printf "  %-55s " "nvtx_kernel_map";        echo "SKIP (no NVTX_EVENTS)"
+  printf "  %-55s " "iteration_detail iter=1"; echo "SKIP (no NVTX_EVENTS)"
+  printf "  %-55s " "speedup_estimator";       echo "SKIP (no NVTX_EVENTS)"
 fi
 
 # ── Mode 6: idle / sync ───────────────────────────────────────────────────────
 echo "== Mode 6 — idle / sync =="
-run "gpu_idle_gaps"              nsys-ai skill run gpu_idle_gaps "$PROFILE" --format json -p min_gap_ns=1000000
-run "stream_concurrency"         nsys-ai skill run stream_concurrency "$PROFILE" --format json
-run "sync_cost_analysis"         nsys-ai skill run sync_cost_analysis "$PROFILE" --format json
-run "kernel_launch_overhead"     nsys-ai skill run kernel_launch_overhead "$PROFILE" --format json
-run "cpu_gpu_pipeline"           nsys-ai skill run cpu_gpu_pipeline "$PROFILE" --format json
-run "thread_utilization"         nsys-ai skill run thread_utilization "$PROFILE" --format json
-run "module_loading"             nsys-ai skill run module_loading "$PROFILE" --format json
-run "gc_impact"                  nsys-ai skill run gc_impact "$PROFILE" --format json
-run "pipeline_bubble_metrics"    nsys-ai skill run pipeline_bubble_metrics "$PROFILE" --format json
+run_capture "gpu_idle_gaps" "$GAPS_OUT" \
+  nsys-ai skill run gpu_idle_gaps "$PROFILE" --format json -p min_gap_ns=1000000
+# attribution only present on top 5 gaps; check conditionally
+printf "  %-55s " "  gpu_idle_gaps: attribution field"
+ATTR_ROWS=$(python3 -c "
+import json
+d=json.load(open('$GAPS_OUT'))
+rows=[r for r in d if not r.get('_summary') and r.get('attribution')]
+print('yes' if rows else 'no')
+" 2>/dev/null || echo "no")
+if [[ "$ATTR_ROWS" == "yes" ]]; then
+  if grep -qE '"description"' "$GAPS_OUT" 2>/dev/null; then
+    echo "OK"
+  else
+    echo "FAIL (attribution.description missing)"
+    FAIL=$((FAIL+1))
+  fi
+else
+  echo "SKIP (no gaps large enough for CPU attribution)"
+fi
+
+run "stream_concurrency"   nsys-ai skill run stream_concurrency "$PROFILE" --format json
+
+run_capture "sync_cost_analysis" "$SYNC_OUT" \
+  nsys-ai skill run sync_cost_analysis "$PROFILE" --format json
+check_regex "  sync_cost_analysis: sync_density_pct" "$SYNC_OUT" '"sync_density_pct"'
+
+run "kernel_launch_overhead" nsys-ai skill run kernel_launch_overhead "$PROFILE" --format json
+
+run_capture "cpu_gpu_pipeline" "$CPU_GPU_OUT" \
+  nsys-ai skill run cpu_gpu_pipeline "$PROFILE" --format json
+check_field_conditional \
+  "  cpu_gpu_pipeline: starvation_events"  "$CPU_GPU_OUT" '"starvation_events"' \
+  "no dispatch data"
+
+run "thread_utilization"   nsys-ai skill run thread_utilization "$PROFILE" --format json
+run "module_loading"       nsys-ai skill run module_loading "$PROFILE" --format json
+run "gc_impact"            nsys-ai skill run gc_impact "$PROFILE" --format json
+run "pipeline_bubble_metrics" nsys-ai skill run pipeline_bubble_metrics "$PROFILE" --format json
 
 # ── Stage A evidence / timeline surface ───────────────────────────────────────
 echo "== Stage A — evidence build + timeline-web surface =="
-run "evidence build"             nsys-ai evidence build "$PROFILE" --format json -o /tmp/findings_smoke.json
-run "findings JSON valid"        bash -c "python3 -c 'import json; json.load(open(\"/tmp/findings_smoke.json\"))'"
-run "findings has findings key"  bash -c "python3 -c 'import json; assert \"findings\" in json.load(open(\"/tmp/findings_smoke.json\"))'"
-run "timeline-web --help"        nsys-ai timeline-web --help
+run "evidence build"          nsys-ai evidence build "$PROFILE" --format json -o /tmp/findings_smoke.json
+run "findings JSON valid"     bash -c "python3 -c 'import json; json.load(open(\"/tmp/findings_smoke.json\"))'"
+run "findings has findings key" bash -c "python3 -c 'import json; assert \"findings\" in json.load(open(\"/tmp/findings_smoke.json\"))'"
+run "timeline-web --help"     nsys-ai timeline-web --help
 
-# ── /nsys-ai skill name check ─────────────────────────────────────────────────
+# ── Plugin skill name check ───────────────────────────────────────────────────
 echo "== Plugin skill name (/nsys-ai) =="
 SKILL_NAME=$(python3 -c "
 import re, pathlib
@@ -218,7 +408,7 @@ content = pathlib.Path('skills/analyze/SKILL.md').read_text()
 m = re.search(r'^name:\s*(\S+)', content, re.MULTILINE)
 print(m.group(1) if m else 'NOT_FOUND')
 " 2>/dev/null || echo NOT_FOUND)
-printf "  %-50s " "SKILL.md name == nsys-ai"
+printf "  %-55s " "SKILL.md name == nsys-ai"
 if [[ "$SKILL_NAME" == "nsys-ai" ]]; then
   echo "OK"
 else
