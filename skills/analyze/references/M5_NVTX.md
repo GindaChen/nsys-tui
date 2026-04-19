@@ -56,7 +56,7 @@ device. `kernel_instances` accepts `-p device=N`. See PRINCIPLES.md §6.
 **Path B** (no NVTX — fallback):
 
 ```bash
-nsys-ai skill run top_kernels <profile> --format json --max-rows 30
+nsys-ai skill run top_kernels <profile> -p limit=30 --format json --max-rows 30
 nsys-ai skill run kernel_launch_pattern <profile> --format json
 ```
 
@@ -72,7 +72,8 @@ Apply kernel→source heuristic to attribute kernels to model components:
 | `elementwise_kernel*` | Elementwise op (activation, dropout) |
 | `reduce_kernel*` | Reduction (layer norm, softmax) |
 
-`speedup_estimator` is **NOT available** in Path B (requires iteration detection via NVTX).
+`speedup_estimator` is less reliable in Path B without NVTX markers; it may still be used if
+heuristic iteration detection succeeds or if `iteration_ms` is provided manually.
 
 ---
 

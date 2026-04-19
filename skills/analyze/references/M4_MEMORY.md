@@ -34,8 +34,8 @@ nsys-ai skill run memory_transfers <profile> --format json
 nsys-ai skill run h2d_distribution <profile> --format json
 ```
 
-No device propagation for these three skills — they do not accept `-p device=N`.
-See PRINCIPLES.md §6 (device-not-scoped list).
+Device propagation: `memory_bandwidth` and `h2d_distribution` accept `-p device=N`;
+`memory_transfers` does not. See PRINCIPLES.md §6.
 
 ---
 

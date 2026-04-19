@@ -19,7 +19,16 @@ if [[ -z "$PROFILE" || ! -f "$PROFILE" ]]; then
   echo "usage: $0 <profile.sqlite> [nvtx-profile.sqlite]" >&2
   exit 2
 fi
-NVTX_PROFILE="${2:-$PROFILE}"
+if [[ -n "${2:-}" ]]; then
+  if [[ ! -f "$2" ]]; then
+    echo "error: nvtx-profile.sqlite not found: $2" >&2
+    echo "usage: $0 <profile.sqlite> [nvtx-profile.sqlite]" >&2
+    exit 2
+  fi
+  NVTX_PROFILE="$2"
+else
+  NVTX_PROFILE="$PROFILE"
+fi
 
 FAIL=0
 

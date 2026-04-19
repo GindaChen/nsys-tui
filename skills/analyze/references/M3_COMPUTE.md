@@ -35,8 +35,8 @@ per head; `sm90_xmma_gemm_*_4096x` → H=4096). Ask only when kernel names give 
 
 | Sub-focus | Skills (in order) |
 |-----------|-------------------|
-| `top-n` (default) | `top_kernels --max-rows 20` → `kernel_launch_pattern` |
-| `tensor-core` | `tensor_core_usage` → `top_kernels --max-rows 10` |
+| `top-n` (default) | `top_kernels -p limit=20` → `kernel_launch_pattern` |
+| `tensor-core` | `tensor_core_usage` → `top_kernels -p limit=10` |
 | `mfu` | `theoretical_flops -p operation=<op> -p hidden_dim=<H> -p seq_len=<S>` → `region_mfu -p name=<region> -p theoretical_flops=<N>` → `arithmetic_intensity -p theoretical_flops=<N>` |
 | `specific-kernel` | `kernel_instances -p name=<name>` |
 
