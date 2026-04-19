@@ -54,7 +54,7 @@ What would you like to analyze?
   4. Memory           — H2D / D2H / bandwidth
   5. NVTX / code map  — which layer / step consumes time
   6. Idle / sync      — GPU gaps, CPU stalls, launch overhead
-  7. CUTracer         — SASS-level (requires re-run)             (coming Stage C1)
+  7. CUTracer         — SASS-level (requires re-run)
   8. Diff             — compare two profiles                     (coming Stage C2)
   9. Variance         — some iterations much slower than others  (coming Stage C2)
 
@@ -86,14 +86,13 @@ position).
 > escapes only. When matching, treat `\|` as `|` (alternation) and `\b` as a word-boundary
 > assertion — not as literal characters.
 
-For priorities not yet implemented (marked "(coming Stage C1/C2)" in the menu above — modes
-7, 8, 9), fall through to Mode 1 with a one-line notice:
+For priorities not yet implemented (marked "(coming Stage C2)" in the menu above — modes
+8, 9), fall through to Mode 1 with a one-line notice:
 
-> "Specialist Mode <N> coming in Stage <C1/C2>. Running auto-triage (Mode 1) now."
+> "Specialist Mode <N> coming in Stage C2. Running auto-triage (Mode 1) now."
 
-Priorities 4–9 are currently live because they route to modes 1–6; priorities 1
-(cutracer), 2 (diff), and 3 (variance) route to modes 7–9 and still fall through until
-C1/C2.
+Priorities 1–9 are all handled: priorities 1–6 route directly; priorities 2 (diff) and
+3 (variance) still fall through until C2. Priority 1 (cutracer) routes to Mode 7 (live).
 
 ---
 
@@ -107,7 +106,7 @@ C1/C2.
 | 4 Memory | `references/M4_MEMORY.md` | — | Stage B2 (live) |
 | 5 NVTX | `references/M5_NVTX.md` | — | Stage B2 (live) |
 | 6 Idle | `references/M6_IDLE.md` | — | Stage B1 (live) |
-| 7 CUTracer | `references/M7_CUTRACER.md` *(not yet present)* | — (use Mode 1 auto-triage) | Stage C1 planned |
+| 7 CUTracer | `references/M7_CUTRACER.md` | — | Stage C1 (live) |
 | 8 Diff | `references/M8_DIFF.md` *(not yet present)* | `references/DIFF.md` | Stage C2 planned |
 | 9 Variance | `references/M9_VARIANCE.md` *(not yet present)* | `references/VARIANCE.md` | Stage C2 planned |
 
