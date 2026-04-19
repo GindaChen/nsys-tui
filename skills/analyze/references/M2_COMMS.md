@@ -1,6 +1,6 @@
 # Mode 2 — Comms (NCCL / overlap)
 
-Reference for `/analyze` Mode 2. **Read `PRINCIPLES.md` first** — §4 guards, §5 evidence,
+Reference for `/nsys-ai` Mode 2. **Read `PRINCIPLES.md` first** — §4 guards, §5 evidence,
 §7 fail template, §10 checklist.
 
 ---

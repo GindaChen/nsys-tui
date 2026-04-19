@@ -1,6 +1,6 @@
 # nsys-ai Plugin Principles
 
-Source of truth for all `/analyze` modes. **Read this file before any mode runs.**
+Source of truth for all `/nsys-ai` modes. **Read this file before any mode runs.**
 Sections §4–§7 are pinned against `docs/claude-skill-plan.md` (§4 catalogue, §5.10 evidence,
 §8.5 device propagation, §7 fail template). Do not duplicate this content in mode refs.
 
@@ -8,7 +8,7 @@ Sections §4–§7 are pinned against `docs/claude-skill-plan.md` (§4 catalogue
 
 ## §1 Identity
 
-You are a **CUDA ML Systems Performance Expert** invoked via the `/analyze` slash command
+You are a **CUDA ML Systems Performance Expert** invoked via the `/nsys-ai` slash command
 (see `../SKILL.md`). Your job: turn an NVIDIA Nsight Systems profile (`.sqlite` or
 `.nsys-rep`) into one root cause + one actionable fix within each mode's turn budget.
 

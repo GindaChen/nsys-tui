@@ -1,10 +1,10 @@
 ---
-name: analyze
+name: nsys-ai
 description: >
   GPU performance analysis for NVIDIA Nsight Systems profiles (.sqlite or .nsys-rep files).
   Activates when the user opens a .sqlite/.nsys-rep profile, asks about GPU bottlenecks,
   mentions NCCL / distributed slowdown, asks for MFU / efficiency, wants to compare two
-  runs, mentions CUTracer / SASS, asks about variance / spikes, or types /analyze,
+  runs, mentions CUTracer / SASS, asks about variance / spikes, or types /nsys-ai,
   /nsys-analyze, /gpu-profile, /profile-analysis.
 ---
 
@@ -50,9 +50,9 @@ What would you like to analyze?
 
   1. Auto triage      — not sure where to start                  [default]
   2. Comms            — NCCL / overlap / multi-GPU
-  3. Compute          — top kernels / tensor core / MFU          (coming Stage B2)
-  4. Memory           — H2D / D2H / bandwidth                    (coming Stage B2)
-  5. NVTX / code map  — which layer / step consumes time         (coming Stage B2)
+  3. Compute          — top kernels / tensor core / MFU
+  4. Memory           — H2D / D2H / bandwidth
+  5. NVTX / code map  — which layer / step consumes time
   6. Idle / sync      — GPU gaps, CPU stalls, launch overhead
   7. CUTracer         — SASS-level (requires re-run)             (coming Stage C1)
   8. Diff             — compare two profiles                     (coming Stage C2)
@@ -86,10 +86,14 @@ position).
 > escapes only. When matching, treat `\|` as `|` (alternation) and `\b` as a word-boundary
 > assertion — not as literal characters.
 
-For priorities not yet implemented (marked "(coming Stage …)" in the menu above), fall
-through to Mode 1 with a one-line notice:
+For priorities not yet implemented (marked "(coming Stage C1/C2)" in the menu above — modes
+7, 8, 9), fall through to Mode 1 with a one-line notice:
 
-> "Specialist Mode <N> coming in Stage <B1/B2/C1/C2>. Running auto-triage (Mode 1) now."
+> "Specialist Mode <N> coming in Stage <C1/C2>. Running auto-triage (Mode 1) now."
+
+Priorities 4–9 are currently live because they route to modes 1–6; priorities 1
+(cutracer), 2 (diff), and 3 (variance) route to modes 7–9 and still fall through until
+C1/C2.
 
 ---
 
@@ -99,9 +103,9 @@ through to Mode 1 with a one-line notice:
 |------|-----------|----------------------|--------|
 | 1 Auto | `references/M1_AUTO.md` | — | Stage A (live) |
 | 2 Comms | `references/M2_COMMS.md` | `references/DISTRIBUTED.md` (deeper topology ref) | Stage B1 (live) |
-| 3 Compute | `references/M3_COMPUTE.md` *(not yet present)* | `references/MFU.md` | Stage B2 planned |
-| 4 Memory | `references/M4_MEMORY.md` *(not yet present)* | — (use Mode 1 auto-triage) | Stage B2 planned |
-| 5 NVTX | `references/M5_NVTX.md` *(not yet present)* | — (use Mode 1 auto-triage) | Stage B2 planned |
+| 3 Compute | `references/M3_COMPUTE.md` | `references/MFU.md` (MFU math) | Stage B2 (live) |
+| 4 Memory | `references/M4_MEMORY.md` | — | Stage B2 (live) |
+| 5 NVTX | `references/M5_NVTX.md` | — | Stage B2 (live) |
 | 6 Idle | `references/M6_IDLE.md` | — | Stage B1 (live) |
 | 7 CUTracer | `references/M7_CUTRACER.md` *(not yet present)* | — (use Mode 1 auto-triage) | Stage C1 planned |
 | 8 Diff | `references/M8_DIFF.md` *(not yet present)* | `references/DIFF.md` | Stage C2 planned |
