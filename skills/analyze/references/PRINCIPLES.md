@@ -136,6 +136,15 @@ supplies from manifest: `gpu` = first device in `overlap.available_devices` or 0
 = smart-trim iteration range (if Mode 1 Stage 3 was taken) else
 `0 profile_span_ms/1000`. Slow on large profiles — confirm before running.
 
+### §5.5 Mode 7 evidence exception
+
+Mode 7 (CUTracer) **skips `evidence build` entirely** — `cutracer analyze` output is the
+evidence layer. Open `timeline-web` without `--findings` for unannotated context only:
+
+```bash
+nsys-ai timeline-web <profile>
+```
+
 ---
 
 ## §6 Device Propagation Table

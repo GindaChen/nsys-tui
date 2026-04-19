@@ -11,6 +11,7 @@
 # Stage A:  Mode 1 end-to-end (manifest → evidence → timeline surface check)
 # Stage B1: Mode 2 + Mode 6 drill-down skills + field-shape validation
 # Stage B2: Mode 3, Mode 4, Mode 5 drill-down skills + field-shape validation
+# Stage C1: Mode 7 CUTracer plan + script generation
 
 set -euo pipefail
 
@@ -147,12 +148,15 @@ ITER_OUT="$(mktemp)"
 NLB_OUT="$(mktemp)"
 NKM_OUT="$(mktemp)"
 SE_OUT="$(mktemp)"
+CUPLAN_OUT="$(mktemp)"
+CUPLAN_SCRIPT_OUT="$(mktemp)"
 _cleanup() {
   rm -f "$MANIFEST_OUT" "$OVL_OUT" "$NCCL_BD_OUT" "$NCCL_AN_OUT" "$NCCL_COMM_OUT" \
         "$TC_OUT" "$TK_OUT" "$KLP_OUT" "$AI_OUT" \
         "$MEM_BW_OUT" "$MEM_XFER_OUT" "$H2D_OUT" \
         "$GAPS_OUT" "$SYNC_OUT" "$CPU_GPU_OUT" \
         "$ITER_OUT" "$NLB_OUT" "$NKM_OUT" "$SE_OUT" "$NVTX_PROBE_OUT" \
+        "$CUPLAN_OUT" "$CUPLAN_SCRIPT_OUT" \
         /tmp/findings_smoke.json
 }
 trap _cleanup EXIT
@@ -162,12 +166,6 @@ echo "== Top-level commands =="
 run "nsys-ai --help"             nsys-ai --help
 run "nsys-ai skill list"         nsys-ai skill list
 run "schema_inspect"             nsys-ai skill run schema_inspect "$PROFILE" --format json
-printf "  %-55s " "cutracer check (info)"
-if nsys-ai cutracer check >/dev/null 2>&1; then
-  echo "OK (.so installed)"
-else
-  echo "SKIP (.so not built)"
-fi
 
 # ── Mode 1: manifest + field validation ───────────────────────────────────────
 echo "== Mode 1 — profile_health_manifest + field validation =="
@@ -411,6 +409,29 @@ run "evidence build"          nsys-ai evidence build "$PROFILE" --format json -o
 run "findings JSON valid"     bash -c "python3 -c 'import json; json.load(open(\"/tmp/findings_smoke.json\"))'"
 run "findings has findings key" bash -c "python3 -c 'import json; assert \"findings\" in json.load(open(\"/tmp/findings_smoke.json\"))'"
 run "timeline-web --help"     nsys-ai timeline-web --help
+
+# ── Mode 7: CUTracer ─────────────────────────────────────────────────────────
+echo "== Mode 7 — CUTracer (SASS) =="
+# cutracer check: exit 0 = full SASS mode; exit 1 = .so missing (kernel-launch-logger fallback)
+# or Python package missing (hard block). Both cases are valid smoke outcomes.
+printf "  %-55s " "cutracer check"
+CUTRACER_CHECK_OUT="$(mktemp)"
+if nsys-ai cutracer check >"$CUTRACER_CHECK_OUT" 2>&1; then
+  echo "OK (full SASS mode)"
+elif grep -q "Python package.*OK" "$CUTRACER_CHECK_OUT" 2>/dev/null; then
+  echo "SKIP (.so not built — kernel-launch-logger fallback available)"
+else
+  echo "SKIP (cutracer Python package not installed)"
+fi
+rm -f "$CUTRACER_CHECK_OUT"
+# cutracer plan --top-n 3: should return JSON with up to 3 kernel entries
+run_capture "cutracer plan --top-n 3" "$CUPLAN_OUT" \
+  nsys-ai cutracer plan "$PROFILE" --top-n 3
+check_regex "  cutracer plan: Kernel column present" "$CUPLAN_OUT" 'Kernel'
+# cutracer plan --script: should emit a bash script containing cutracer reference
+run_capture "cutracer plan --script" "$CUPLAN_SCRIPT_OUT" \
+  nsys-ai cutracer plan "$PROFILE" --script --launch-cmd 'echo test'
+check_regex "  cutracer plan script: cutracer ref" "$CUPLAN_SCRIPT_OUT" 'cutracer'
 
 # ── Plugin skill name check ───────────────────────────────────────────────────
 echo "== Plugin skill name (/nsys-ai) =="

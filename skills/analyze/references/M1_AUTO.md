@@ -75,7 +75,7 @@ Suggest specialist mode after delivery only if a second critical finding exists 
 | 4 | `M4_MEMORY.md` | `h2d`/`transfer` bottleneck |
 | 5 | `M5_NVTX.md` | layer attribution needed |
 | 6 | `M6_IDLE.md` | `sync`/`idle`/`bubble` bottleneck |
-| 7 | `M7_CUTRACER.md` (C1) | top kernel > 60%, custom/Triton |
+| 7 | `M7_CUTRACER.md` | top kernel > 60%, custom/Triton |
 | 8 | `M8_DIFF.md` (C2) | regression analysis requested |
 | 9 | `M9_VARIANCE.md` (C2) | iteration spikes detected |
 
