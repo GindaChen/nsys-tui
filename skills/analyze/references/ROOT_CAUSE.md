@@ -64,4 +64,4 @@ One 3-part example per bottleneck class. Use these as delivery templates in Mode
 
 - Deeper NCCL topology (communicator tables, per-GPU imbalance): see `DISTRIBUTED.md`
 - MFU math and model FLOPs formulas: see `MFU.md`
-- Inference framing (ms/token metrics): see `M1_AUTO.md §6.3`
+- Inference framing (ms/token metrics): see `M1_AUTO.md` §6 "Inference framing"

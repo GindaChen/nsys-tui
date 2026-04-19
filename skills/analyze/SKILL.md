@@ -91,8 +91,9 @@ For priorities not yet implemented (marked "(coming Stage C1/C2)" in the menu ab
 
 > "Specialist Mode <N> coming in Stage <C1/C2>. Running auto-triage (Mode 1) now."
 
-Priorities 1–8 are live for modes 1–6; priorities 1 (cutracer), 2 (diff), 3 (variance)
-still fall through until C1/C2.
+Priorities 4–9 are currently live because they route to modes 1–6; priorities 1
+(cutracer), 2 (diff), and 3 (variance) route to modes 7–9 and still fall through until
+C1/C2.
 
 ---
 

@@ -105,14 +105,15 @@ except Exception:
 # ── Profile capability detection ──────────────────────────────────────────────
 # Use the skill itself to probe NVTX — sqlite3 can't read DuckDB parquet caches.
 NVTX_PROBE_OUT="$(mktemp)"
-nsys-ai skill run nvtx_layer_breakdown "$NVTX_PROFILE" --format json --max-rows 1 \
+nsys-ai skill run nvtx_layer_breakdown "$NVTX_PROFILE" --format json --max-rows 2 \
   >"$NVTX_PROBE_OUT" 2>/dev/null || true
-# Detection succeeds when either real region rows or a _detection_meta row with layer_names exists
+# Detection succeeds when either real region rows or a _detection_meta row exists.
+# Probe two rows so a prepended metadata row does not hide the first real NVTX region row.
 HAS_NVTX=$(python3 -c "
 import json
 d = json.load(open('$NVTX_PROBE_OUT'))
 has_regions = any('nvtx_region' in r for r in d)
-has_meta = any(r.get('_detection_meta') and r.get('layer_names') for r in d)
+has_meta = any('_detection_meta' in r for r in d)
 print('1' if (has_regions or has_meta) else '0')
 " 2>/dev/null || echo 0)
 NVTX_ROWS="$HAS_NVTX"
