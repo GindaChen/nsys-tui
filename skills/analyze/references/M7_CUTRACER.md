@@ -108,7 +108,7 @@ From `nsys-ai cutracer analyze <profile> <outdir> --format json` (per-kernel fie
 
 **Kernel-launch-logger fallback** (when `.so` absent): `cutracer analyze` still reports
 `pct_of_gpu` and `achieved_warps` but `instruction_mix_pct` will be empty and `bottleneck`
-null. Surface the launch-count data; advise building the `.so` for full SASS analysis.
+will be `"unknown"`. Surface the launch-count data; advise building the `.so` for full SASS analysis.
 
 ---
 
@@ -116,7 +116,7 @@ null. Surface the launch-count data; advise building the `.so` for full SASS ana
 
 Mode 7 is **terminal** — no chained mode suggestions.
 
-If `bottleneck = null` due to missing `.so`:
+If `bottleneck = "unknown"` due to missing `.so`:
 > "Full SASS analysis requires the CUTracer `.so`. Run `nsys-ai cutracer install`
 > (requires CUDA toolkit + g++) then repeat Mode 7."
 

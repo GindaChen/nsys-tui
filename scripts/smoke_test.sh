@@ -424,7 +424,8 @@ else
   echo "SKIP (cutracer Python package not installed)"
 fi
 rm -f "$CUTRACER_CHECK_OUT"
-# cutracer plan --top-n 3: should return JSON with up to 3 kernel entries
+# cutracer plan --top-n 3: default output is a human-readable table/summary;
+# validate that the table header includes the Kernel column.
 run_capture "cutracer plan --top-n 3" "$CUPLAN_OUT" \
   nsys-ai cutracer plan "$PROFILE" --top-n 3
 check_regex "  cutracer plan: Kernel column present" "$CUPLAN_OUT" 'Kernel'
