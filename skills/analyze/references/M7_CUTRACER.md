@@ -12,8 +12,8 @@ Three checks in sequence — any failure aborts via §7 template:
 
 1. **Tool chain**: `nsys-ai cutracer check` — §4.1 row 5.
    - Exits 0 only when Python package AND `.so` are both present (full SASS mode).
-   - Exits 1 with "Python package : NOT FOUND" → hard block; direct user to `pip install cutracer`.
-   - Exits 1 with ".so : NOT FOUND" → soft note only; plugin proceeds in kernel-launch-logger
+   - Exits 1 with "cutracer Python package : NOT FOUND" → hard block; direct user to `pip install cutracer`.
+   - Exits 1 with "cutracer.so             : NOT FOUND" → soft note only; plugin proceeds in kernel-launch-logger
      mode (launch counts + warp dims, no SASS mix). Full SASS requires `nsys-ai cutracer install`
      (needs nvcc / g++ / make / git / libzstd-dev — §4.2 auto-handled at run time).
 
@@ -99,7 +99,7 @@ From `nsys-ai cutracer analyze <profile> <outdir> --format json` (per-kernel fie
 | Field / condition | Diagnosis | Action |
 |-------------------|-----------|--------|
 | `bottleneck = "memory"` | Memory-bound (LDG/STG stalls > 25% or `instruction_mix_pct.memory > 30%`) | Tile into shared memory; use `__ldg` / `cp.async`; reduce redundant loads |
-| `bottleneck = "compute"` | Compute-bound (`instruction_mix_pct.compute + .tensor > 60%`) | Tune register reuse; increase tile size; try `torch.compile` |
+| `bottleneck = "compute"` | Compute-bound (`instruction_mix_pct.compute + instruction_mix_pct.tensor > 60%`) | Tune register reuse; increase tile size; try `torch.compile` |
 | `bottleneck = "sync"` | Sync-bound (`instruction_mix_pct.sync > 15%`) | Replace `__syncthreads` with `__syncwarp`; reduce barrier frequency |
 | `bank_conflict_hint = true` | Shared memory bank conflicts (high LDS/STS stall) | Pad shared memory arrays by 1 element per row |
 | `tensor_core_active = false` AND eligible kernel | Tensor cores inactive | Force BF16/TF32; check matmul shape — pad to multiple of 8/16 |
