@@ -1,8 +1,9 @@
 # nsys-ai Plugin Principles
 
 Source of truth for all `/nsys-ai` modes. **Read this file before any mode runs.**
-Sections §4–§7 are pinned against `docs/claude-skill-plan.md` (§4 catalogue, §5.10 evidence,
-§8.5 device propagation, §7 fail template). Do not duplicate this content in mode refs.
+Sections §4 (CLI-level guards), §5 (universal evidence step), §6 (device propagation),
+and §7 (precondition-fail template) are the single source of truth — do not duplicate this
+content in mode refs.
 
 ---
 
@@ -108,10 +109,14 @@ Then tell the user the exact URL emitted by `timeline-web` (look for `http://127
 
 If the auto-builder misses the mode's highlight, craft `findings.json` manually via
 `nsys-ai skill run kernel_instances <profile> --format json -p name=<hot>` for ns-level
-timestamps. Example for Mode 8 regression overlay:
+timestamps. **Finding `type` must be one of `"region"`, `"highlight"`, or `"marker"`** —
+other values are silently ignored by the timeline renderer (see
+`src/nsys_ai/annotation.py`). Encode mode-specific context (e.g. regression, spike) via
+`label` / `note` / `severity`, not via the `type` field. Example for Mode 8 overlay:
 
 ```json
-{"findings": [{"type": "regression", "label": "flash_bwd +31%",
+{"findings": [{"type": "region", "label": "Regression: flash_bwd +31%",
+  "note": "Regressed in after profile vs before",
   "start_ns": 12340000, "end_ns": 15670000, "severity": "critical"}]}
 ```
 
@@ -144,6 +149,33 @@ evidence layer. Open `timeline-web` without `--findings` for unannotated context
 ```bash
 nsys-ai timeline-web <profile>
 ```
+
+### §5.6 Mode 8 evidence adaptation
+
+Mode 8 (Diff) has two profiles but only **one after-timeline** is served. Run
+`evidence build` on the **after profile only** — never on the before profile.
+
+```bash
+nsys-ai evidence build <after> --format json -o /tmp/findings.json
+```
+
+Then annotate `findings.json` with regression labels pulled from
+`nsys-ai diff <before> <after> --format json` before invoking `timeline-web`.
+**Use `type: "region"`** (the only supported range-type — `"highlight"` is single-point,
+`"marker"` is a vertical line; `"regression"` is NOT a recognized type and will be ignored):
+
+```json
+{"findings": [{"type": "region", "label": "Regression: flash_bwd +31%",
+  "note": "Regressed in after profile vs before",
+  "start_ns": 12340000, "end_ns": 15670000, "severity": "critical"}]}
+```
+
+```bash
+nsys-ai timeline-web <after> --findings /tmp/findings.json
+```
+
+Rationale: there is no "before timeline" in a diff delivery; the user's attention goes
+to the regressed after-state. Annotating the before profile would be misleading.
 
 ---
 
@@ -246,14 +278,3 @@ After any mode completes, verify:
 - [ ] Time values converted from ns (÷ 1e6 ms, ÷ 1e9 s)
 - [ ] §5 evidence step ran; `http://127.0.0.1:PORT` URL printed
 
----
-
-## §11 Pin to Plan
-
-§4–§7 are pinned against `docs/claude-skill-plan.md`:
-- §4 mirrors plan §4 (CLI-level precondition catalogue)
-- §5 mirrors plan §5.10 (universal evidence step)
-- §6 mirrors plan §8.5 (device propagation)
-- §7 mirrors plan §7 (fail template)
-
-If the plan diverges, update this file in the same PR to keep them in sync.

@@ -62,7 +62,7 @@ and model architecture table.
 | `arithmetic_intensity.classification` starts with `"Memory-bound"` | Below ridge point | fuse ops; increase tile sizes; reduce redundant loads |
 | `arithmetic_intensity.classification` starts with `"Compute-bound"` with low MFU | Above ridge but inefficient | occupancy issue; check register pressure / block size |
 | `kernel_launch_pattern.sync_stalls` > 0 on a stream | CPU dispatch bottleneck | use CUDA graphs; batch launches |
-| `top_kernels[0]` is custom / Triton AND > 60% | SASS-level investigation warranted | suggest Mode 7 (coming Stage C1) |
+| `top_kernels[0]` is custom / Triton AND > 60% | SASS-level investigation warranted | suggest Mode 7 |
 
 ---
 
@@ -72,7 +72,7 @@ After delivery, suggest a second mode only if a distinct critical finding exists
 Soft cap: avoid suggesting >2 modes in one delivery.
 
 - Top custom/Triton kernel > 60% AND `tensor_core_usage` / `arithmetic_intensity` ambiguous
-  → suggest **Mode 7** (coming Stage C1; fall through to Mode 1 until then)
+  → suggest **Mode 7** (SASS analysis — see `M7_CUTRACER.md` for cost-gated entry)
 - Per-layer attribution needed to identify which model component owns the hotspot
   → suggest **Mode 5** (`layer` sub-focus)
 

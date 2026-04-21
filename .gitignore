@@ -19,6 +19,7 @@ cutracer_out_real/
 data/nsys-hero/
 
 *.sqlite
+!tests/fixtures/mock.sqlite
 *.nsys-rep
 *.nsys-cache/
 *.sqlite.timeline-cache-*.json

@@ -61,8 +61,6 @@ What would you like to analyze?
 Reply with a number, or ask a question directly — keywords auto-route.
 ```
 
-Update the "(coming Stage X)" annotations as stages merge.
-
 ---
 
 ## Keyword Routing (priority order; first match wins)

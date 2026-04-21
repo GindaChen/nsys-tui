@@ -258,6 +258,15 @@ Tweak settings live with ↑/↓ to select and ←/→ to adjust:
 
 ---
 
+## 🤖 Claude Code plugin
+
+nsys-ai ships as a [Claude Code](https://claude.com/claude-code) plugin: one slash command
+`/nsys-ai` turns a profile into a root-cause + fix + annotated timeline. See
+[docs/claude-plugin-quickstart.md](docs/claude-plugin-quickstart.md) to install and
+[docs/claude-plugin.md](docs/claude-plugin.md) for the full 9-mode reference.
+
+---
+
 ## 📚 Documentation
 
 The `docs/` directory includes comprehensive guides for Nsight Systems profiling:

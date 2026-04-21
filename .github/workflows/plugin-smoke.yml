@@ -1,0 +1,44 @@
+name: plugin-smoke
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'skills/**'
+      - 'scripts/smoke_test.sh'
+      - 'scripts/build_fixture.py'
+      - '.claude-plugin/**'
+      - 'tests/fixtures/mock.sqlite'
+      - '.github/workflows/plugin-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install nsys-ai
+        run: pip install -e '.[agent]'
+
+      - name: Verify fixture present
+        id: fixture
+        run: |
+          if [[ ! -f tests/fixtures/mock.sqlite ]]; then
+            echo "::warning::tests/fixtures/mock.sqlite missing — smoke test skipped."
+            echo "::warning::Regenerate on a CUDA host: python scripts/build_fixture.py"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run plugin smoke test
+        if: steps.fixture.outputs.present == 'true'
+        run: bash scripts/smoke_test.sh tests/fixtures/mock.sqlite
+
+      - name: build_fixture.py --dry-run
+        run: python scripts/build_fixture.py --dry-run

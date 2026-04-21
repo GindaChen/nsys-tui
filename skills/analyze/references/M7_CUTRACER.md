@@ -66,7 +66,7 @@ Round seconds to 1 decimal; USD to 2 decimals.
 
 ---
 
-## 3. Commands
+## 3. Skills
 
 ```bash
 # 1. Verify tool chain

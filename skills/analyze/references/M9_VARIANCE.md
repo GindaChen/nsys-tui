@@ -37,7 +37,7 @@ or `kernels` only.
 
 ---
 
-## 3. Commands
+## 3. Skills
 
 ```bash
 # 1. Detect iterations and surface slow outliers

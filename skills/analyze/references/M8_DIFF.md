@@ -41,7 +41,7 @@ Three checks; any failure → §7 template and abort:
 
 ---
 
-## 3. Commands
+## 3. Skills
 
 ```bash
 # 1. Check iteration counts for Stage 3 decision
@@ -98,8 +98,9 @@ fields: `name`, `demangled`, `delta_ns`, `before_share`, `after_share`, `classif
 
 ## 6. Delivery
 
-**Evidence**: PRINCIPLES §5.10 Mode 8 adaptation — run `evidence build <after>` only.
-Craft a findings JSON with regression labels, then serve the after-profile timeline:
+**Evidence**: follow PRINCIPLES §5.6 (Mode 8 adaptation) — run `evidence build <after>`
+only, never the before profile. Craft a findings JSON with regression labels, then serve
+the after-profile timeline:
 
 ```bash
 nsys-ai skill run kernel_instances <after> --format json -p name=<hot_kernel>
@@ -107,9 +108,12 @@ nsys-ai skill run kernel_instances <after> --format json -p name=<hot_kernel>
 nsys-ai timeline-web <after> --findings /tmp/findings.json
 ```
 
-`findings.json` shape:
+`findings.json` shape (use `type: "region"` — `"regression"` is not a recognized finding
+type and is silently ignored by the timeline renderer; encode regression context in
+`label` / `note`):
 ```json
-{"findings": [{"type": "regression", "label": "<name> +<delta_ms>ms",
+{"findings": [{"type": "region", "label": "Regression: <name> +<delta_ms>ms",
+  "note": "Regressed in after profile vs before",
   "start_ns": <start>, "end_ns": <end>, "severity": "critical"}]}
 ```
 
