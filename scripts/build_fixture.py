@@ -8,8 +8,10 @@ Requirements (for a real build, not --dry-run):
     runs with — the inner capture is `python -c "import torch; torch.zeros(16, device='cuda') ..."`.
     On a multi-venv system run via the CUDA venv, e.g. `.venv-gpu/bin/python scripts/build_fixture.py`.
 
-Produces a minimal profile (1 tiny kernel, no NCCL, no NVTX) — just enough to
-exercise nsys-ai CLI wiring in CI without depending on user-local ~100 MB profiles.
+Produces a minimal profile (a couple of tiny kernels, no NCCL, no NVTX) — just
+enough to exercise nsys-ai CLI wiring in CI without depending on user-local
+~100 MB profiles. The exact kernel count depends on torch/CUDA version but has
+historically been 1–3 kernels for `torch.zeros(16, device='cuda').sum().item()`.
 
 CI (`.github/workflows/plugin-smoke.yml`) loads the committed fixture; this
 script is run manually on a CUDA host when the nsys schema changes.

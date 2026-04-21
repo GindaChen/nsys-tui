@@ -109,10 +109,14 @@ Then tell the user the exact URL emitted by `timeline-web` (look for `http://127
 
 If the auto-builder misses the mode's highlight, craft `findings.json` manually via
 `nsys-ai skill run kernel_instances <profile> --format json -p name=<hot>` for ns-level
-timestamps. Example for Mode 8 regression overlay:
+timestamps. **Finding `type` must be one of `"region"`, `"highlight"`, or `"marker"`** —
+other values are silently ignored by the timeline renderer (see
+`src/nsys_ai/annotation.py`). Encode mode-specific context (e.g. regression, spike) via
+`label` / `note` / `severity`, not via the `type` field. Example for Mode 8 overlay:
 
 ```json
-{"findings": [{"type": "regression", "label": "flash_bwd +31%",
+{"findings": [{"type": "region", "label": "Regression: flash_bwd +31%",
+  "note": "Regressed in after profile vs before",
   "start_ns": 12340000, "end_ns": 15670000, "severity": "critical"}]}
 ```
 
@@ -156,10 +160,13 @@ nsys-ai evidence build <after> --format json -o /tmp/findings.json
 ```
 
 Then annotate `findings.json` with regression labels pulled from
-`nsys-ai diff <before> <after> --format json` before invoking `timeline-web`:
+`nsys-ai diff <before> <after> --format json` before invoking `timeline-web`.
+**Use `type: "region"`** (the only supported range-type — `"highlight"` is single-point,
+`"marker"` is a vertical line; `"regression"` is NOT a recognized type and will be ignored):
 
 ```json
-{"findings": [{"type": "regression", "label": "flash_bwd +31%",
+{"findings": [{"type": "region", "label": "Regression: flash_bwd +31%",
+  "note": "Regressed in after profile vs before",
   "start_ns": 12340000, "end_ns": 15670000, "severity": "critical"}]}
 ```
 

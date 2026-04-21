@@ -108,9 +108,12 @@ nsys-ai skill run kernel_instances <after> --format json -p name=<hot_kernel>
 nsys-ai timeline-web <after> --findings /tmp/findings.json
 ```
 
-`findings.json` shape:
+`findings.json` shape (use `type: "region"` — `"regression"` is not a recognized finding
+type and is silently ignored by the timeline renderer; encode regression context in
+`label` / `note`):
 ```json
-{"findings": [{"type": "regression", "label": "<name> +<delta_ms>ms",
+{"findings": [{"type": "region", "label": "Regression: <name> +<delta_ms>ms",
+  "note": "Regressed in after profile vs before",
   "start_ns": <start>, "end_ns": <end>, "severity": "critical"}]}
 ```
 
