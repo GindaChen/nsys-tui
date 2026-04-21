@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "GindaChen",
+  "description": "Plugins from GindaChen — GPU performance analysis and profiling tools for NVIDIA Nsight Systems.",
+  "owner": {
+    "name": "GindaChen",
+    "url": "https://github.com/GindaChen"
+  },
+  "plugins": [
+    {
+      "name": "nsys-ai",
+      "description": "GPU profile analysis for NVIDIA Nsight Systems. Triage bottlenecks, diagnose NCCL, compute MFU, compare regressions, and drill into SASS instructions. Requires the nsys-ai CLI (>= 0.2.1): pip install nsys-ai.",
+      "category": "development",
+      "source": ".",
+      "homepage": "https://github.com/GindaChen/nsys-ai"
+    }
+  ]
+}
