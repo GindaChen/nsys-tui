@@ -37,9 +37,10 @@ Skip Stage 2 if keyword already implies sub-focus (e.g. "dataloader" → `cpu-pi
 | `cpu-pipeline` | `cpu_gpu_pipeline` → `thread_utilization` |
 | `all` (default) | `gpu_idle_gaps` → `stream_concurrency` → `sync_cost_analysis` → `host_sync_parent_ranges` (if `manifest.nvtx.has_nvtx` and `sync_cost_analysis.sync_density_pct > 20`) → `kernel_launch_overhead` → `cpu_gpu_pipeline` → `thread_utilization` → `module_loading` → `gc_impact` (if `starvation_events > 0`) → `pipeline_bubble_metrics` (if `nccl.collectives > 0`) |
 
-Device propagation: `gpu_idle_gaps` accepts `-p device=N`. `stream_concurrency`,
-`sync_cost_analysis`, `kernel_launch_overhead`, `cpu_gpu_pipeline` do not accept device.
-See PRINCIPLES.md §6.
+Device propagation: `gpu_idle_gaps` and `sync_cost_analysis` accept `-p device=N`.
+`stream_concurrency`, `kernel_launch_overhead`, `cpu_gpu_pipeline` do not accept device.
+`sync_cost_analysis` additionally emits `sync_by_device` in its unfiltered default, so a
+single call answers both "total sync" and "which rank owns it". See PRINCIPLES.md §6.
 
 ---
 
@@ -49,6 +50,7 @@ See PRINCIPLES.md §6.
 |-------------------|-----------|--------|
 | manifest `idle.idle_pct > 15` OR `pipeline_bubble_metrics.bubble_pct > 15` | GPU starved | check DataLoader / CPU dispatch |
 | `sync_cost_analysis.sync_density_pct > 20` | Excessive CPU→GPU syncs | remove `.item()` / `.cpu()` in loop |
+| `sync_cost_analysis.sync_by_device` shows one device >> others (ratio > 2× OR another device has 0 sync) | Multi-rank asymmetry: one rank stragglers the collective; other ranks just wait on it | fix sync on the stragglering device first. Do NOT cross-exit to Mode 2 (Comms) — the NCCL idle is a symptom of host-blocking, not real comm imbalance |
 | `kernel_launch_overhead.overhead_us` concentrated in the top `kernel_name` | High CPU dispatch latency | async launch; reduce Python overhead |
 | any `cpu_gpu_pipeline` row has `starvation_events > 0` | CPU can't feed GPU fast enough | `num_workers`, `pin_memory`, `prefetch_factor` |
 | `thread_utilization` non-empty: one Python/DataLoader thread dominating CPU utilization | CPU thread saturation / imbalance | `persistent_workers=True`, tune/reduce workers |

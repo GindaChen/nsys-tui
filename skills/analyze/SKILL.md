@@ -6,6 +6,7 @@ description: >
   mentions NCCL / distributed slowdown, asks for MFU / efficiency, wants to compare two
   runs, mentions CUTracer / SASS, asks about variance / spikes, or types /nsys-ai,
   /nsys-analyze, /gpu-profile, /profile-analysis.
+argument-hint: "[profile.sqlite | question]"
 ---
 
 # nsys-ai — GPU Profile Analysis Skill
@@ -33,33 +34,63 @@ If not installed: `pip install "nsys-ai[agent]"`.
 
 ---
 
-## Mode Menu
+## Mode Menu (interactive wizard)
 
-If 0 args AND no profile path in message, scan CWD (top 10 by mtime):
+Fires AT MOST once per session, and ONLY when the user has not already steered
+via keyword. Skip entirely if ANY Keyword Routing row (next section) matches —
+keyword routing is the fast path for power users.
+
+### Step 0 — scan CWD (always)
+
 ```bash
-(ls -t *.sqlite *.nsys-rep 2>/dev/null || true) | head -10
+(ls -lt *.sqlite *.nsys-rep 2>/dev/null || true) | head -10
 ```
-(The `|| true` keeps the pipeline exit code 0 when no files match, so the "If empty" branch
-below is always reachable — without it, `ls` exits non-zero on no matches and may be treated
-as a tool failure.) If empty: `"No profile found in CWD; give me a path to a .sqlite or .nsys-rep file."`
+(The `|| true` keeps exit code 0 when no files match, so every branch below is
+reachable — without it, `ls` exits non-zero on no matches and may be treated as
+a tool failure.) Classify:
 
-Otherwise, render the menu **once per session**:
+- `0 files` AND no path in message → reply `"No profile found in CWD; give me a
+  path to a .sqlite or .nsys-rep file."` Do NOT call `AskUserQuestion`.
+- `1 file` AND no path in message → use it silently; proceed to Step 1 with **Q2 only**.
+- `2+ files` OR user already supplied a path → proceed to Step 1.
 
-```
-What would you like to analyze?
+### Step 1 — single `AskUserQuestion` call (batch Q1+Q2, or Q2 only)
 
-  1. Auto triage      — not sure where to start                  [default]
-  2. Comms            — NCCL / overlap / multi-GPU
-  3. Compute          — top kernels / tensor core / MFU
-  4. Memory           — H2D / D2H / bandwidth
-  5. NVTX / code map  — which layer / step consumes time
-  6. Idle / sync      — GPU gaps, CPU stalls, launch overhead
-  7. CUTracer         — SASS-level (requires re-run)
-  8. Diff             — compare two profiles
-  9. Variance         — some iterations much slower than others
+**Q1 — Profile** (omit if profile already supplied OR only 1 file found)
+- `header`: `"Profile"`
+- `question`: `"Which profile should I analyze?"`
+- `options` (2–4, newest by mtime first): `label` = filename basename;
+  `description` = relative mtime (`"2h ago"`, `"yesterday"`, etc. — derive from `ls -lt`).
+- Auto `Other` lets the user type a path (do NOT add `Other` manually).
 
-Reply with a number, or ask a question directly — keywords auto-route.
-```
+**Q2 — Focus** (always)
+- `header`: `"Focus"`
+- `question`: `"What would you like to analyze?"`
+- `options` (exactly 4, Recommended first):
+  1. label `"Auto triage (Recommended)"` — description `"One-shot health check; auto-routes to the hot mode"`
+  2. label `"Compute"` — description `"Kernels, MFU, tensor-core usage"`
+  3. label `"Comms"` — description `"NCCL, overlap %, multi-GPU distributed"`
+  4. label `"Idle"` — description `"GPU gaps, CPU sync, DataLoader stalls"`
+- Auto `Other` lets user type a keyword (e.g. `memory`, `nvtx`, `variance`,
+  `diff`, `cutracer`) — re-run Keyword Routing on the free text.
+
+### Step 2 — dispatch
+
+| Q2 answer | Mode ref |
+|---|---|
+| `Auto triage (Recommended)` | `references/M1_AUTO.md` |
+| `Compute` | `references/M3_COMPUTE.md` |
+| `Comms` | `references/M2_COMMS.md` |
+| `Idle` | `references/M6_IDLE.md` |
+| `Other` (free text) | Re-run Keyword Routing on the text; no match → Mode 1 |
+
+Once dispatched, follow the Mode ref's six sections (Precondition / Stages / Skills
+/ Signals / Cross-mode exits / Delivery).
+
+### Session invariant
+
+Wizard fires at most once per session. After the first run (or any keyword-routed
+run), subsequent messages use Keyword Routing only — never re-fire `AskUserQuestion`.
 
 ---
 
@@ -139,6 +170,7 @@ first `iteration_timing` call — use the manifest values directly and jump to S
 9. "Per-step" cost claims require frequency verification (event count ≥ `iteration_count`);
    one-shot events must be reframed as one-time overhead, not extrapolated.
 10. Code fixes must render as a before/after code block — no pure-prose "convert to …".
+11. Inferred numeric values must be labeled `(inferred from …)` or `≈` — no silent derivations.
 
 **Universal evidence step** (PRINCIPLES.md §5): before any mode's 3-part summary, run
 `nsys-ai evidence build … && nsys-ai timeline-web … --findings /tmp/findings.json`, then
