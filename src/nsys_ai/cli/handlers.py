@@ -172,18 +172,51 @@ def _cutracer_check():
     """Verify CUTracer Python package and .so availability."""
     import importlib.util
 
+    from nsys_ai.cutracer.installer import CUTRACER_TAG
+
     ok = True
 
-    # Python package
-    if importlib.util.find_spec("cutracer") is not None:
-        import cutracer as _ct  # type: ignore[import]
-
-        version = getattr(_ct, "__version__", "unknown")
-        print(f"  cutracer Python package : OK (v{version})")
-    else:
+    # Python package. find_spec only proves the module can be *located*; the
+    # import itself can still fail, and a check that crashes on the condition it
+    # exists to report is worse than no check. cutracer 0.2.1 and 0.3.0 both
+    # import importlib_resources without declaring it, so on an environment
+    # without that backport this raised ModuleNotFoundError straight out of
+    # `nsys-ai cutracer check`.
+    version = None
+    if importlib.util.find_spec("cutracer") is None:
         print("  cutracer Python package : NOT FOUND")
         print("    Install: pip install cutracer")
         ok = False
+    else:
+        try:
+            import cutracer as _ct  # type: ignore[import]
+        except Exception as exc:  # noqa: BLE001 - any import failure is a finding
+            print("  cutracer Python package : FOUND but not importable")
+            print(f"    {type(exc).__name__}: {exc}")
+            print(
+                "    The package is installed and its own import failed, which is a "
+                "problem in that package or its environment rather than in nsys-ai."
+            )
+            if isinstance(exc, ModuleNotFoundError) and exc.name:
+                print(f"    Try: pip install {exc.name}")
+            ok = False
+        else:
+            version = getattr(_ct, "__version__", None)
+            print(f"  cutracer Python package : OK (v{version or 'unknown'})")
+
+    # The pip package and the .so are versioned separately: the `cutracer` extra
+    # is unpinned above 0.2.0, so pip installs whatever is current, while the
+    # bundled installer builds one tag. They can differ by a minor version with
+    # nothing saying so, and the traces the .so writes are what the parser reads.
+    if version and version != CUTRACER_TAG.lstrip("v"):
+        print(
+            f"  version alignment       : package v{version}, "
+            f"but `nsys-ai cutracer install` builds {CUTRACER_TAG}"
+        )
+        print(
+            "    A .so built by this installer does not match the installed package. "
+            "Pin the package to match, or set CUTRACER_SO to a .so you built yourself."
+        )
 
     # .so instrumentation library
     so_path = _find_cutracer_so()

@@ -41,8 +41,12 @@ NVBIT_REPO = "https://github.com/NVlabs/NVBit/releases/download"
 NVBIT_VERSION = "1.7.1"
 # The CUTracer repo migrated from the facebookresearch org to facebookexperimental.
 CUTRACER_GITHUB = "https://github.com/facebookexperimental/CUTracer"
-# Pinned release tag for reproducible builds (clone --branch). Bump on upstream releases.
-CUTRACER_TAG = "v0.2.1"
+# Pinned release tag for reproducible builds (clone --branch). Bump on upstream
+# releases, and keep it aligned with what the ``cutracer`` extra installs: the
+# extra is unpinned above 0.2.0, so pip takes the newest release, and a .so built
+# from a different tag writes traces this parser was not written against.
+# ``nsys-ai cutracer check`` compares the two and says so when they diverge.
+CUTRACER_TAG = "v0.3.0"
 
 # CUDA major.minor → NVBit release asset name pattern
 # NVBit ships separate builds for each CUDA toolkit version.
