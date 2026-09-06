@@ -49,8 +49,14 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _error(code: str, message: str) -> ErrorDict:
-    return {"error": {"code": code, "message": message}}
+def _error(code: str, message: str, **detail) -> ErrorDict:
+    """A refusal row: the coded error, plus any fields the caller needs to act.
+
+    ``detail`` sits at row level rather than inside ``error`` so a consumer reads
+    it the way it reads any other column — the same shape ``abstain(reason,
+    **detail)`` uses in the skill layer.
+    """
+    return {"error": {"code": code, "message": message}, **detail}
 
 
 # ---------------------------------------------------------------------------
@@ -566,6 +572,46 @@ def compute_mfu_metrics_for_region(
     mfu_wall = 100.0 * achieved_wall / peak_tflops
     mfu_sum = 100.0 * achieved_sum / peak_tflops
     mfu_union = 100.0 * achieved_union / peak_tflops
+
+    # Hardware cannot exceed its own peak, so an MFU over 100% is not a fast
+    # region -- it is a malformed question, and the numbers below it are
+    # artefacts of the inputs rather than measurements. This is the same refusal
+    # arithmetic_intensity makes (#385), where a 369% reading was published as
+    # "High kernel throughput (likely compute-bound)" with advice to go tune the
+    # kernel. This skill's entire output is MFU and it had no such guard.
+    #
+    # No tolerance band: 1% over is as impossible as 300% over, and a band would
+    # only decide how much nonsense to publish.
+    #
+    # All three bases are checked because all three are published, and the
+    # denominators differ -- a borrowed numerator can land one over while the
+    # others sit under.
+    worst_basis, worst_mfu = max(
+        (("wall", mfu_wall), ("kernel_sum", mfu_sum), ("kernel_union", mfu_union)),
+        key=lambda pair: pair[1],
+    )
+    if worst_mfu > 100.0:
+        return _error(
+            "MFU_EXCEEDS_PEAK",
+            f"Refusing to report MFU. On the {worst_basis} basis this calculation puts the "
+            f"region at {worst_mfu:,.1f}% of peak "
+            f"({peak_tflops:,.1f} TFLOPS), which hardware cannot do, so one of the two inputs "
+            f"is not what the calculation assumes. theoretical_flops="
+            f"{theoretical_flops:.4g} is read as the total FLOPs of the work inside this one "
+            f"region: passing a whole job's FLOPs against a region that measures a single rank, "
+            f"or a per-second rate instead of a total, lands exactly here. Check that first, "
+            f"then peak_tflops and num_gpus -- a peak scaled for more GPUs than the region "
+            f"actually covers is the other way in.",
+            # Prefixed deliberately. These are the repudiated figures, kept
+            # because they are what a caller needs to find their input error --
+            # but a consumer reading mfu_pct_wall must not be handed the very
+            # number this branch exists to refuse.
+            implied_mfu_pct_wall=round(mfu_wall, 2),
+            implied_mfu_pct_kernel_sum=round(mfu_sum, 2),
+            implied_mfu_pct_kernel_union=round(mfu_union, 2),
+            implied_achieved_tflops_wall=round(achieved_wall, 2),
+            peak_tflops=float(peak_tflops),
+        )
 
     return {
         "theoretical_flops": float(theoretical_flops),

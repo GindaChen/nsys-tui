@@ -95,16 +95,27 @@ def test_get_region_kernels_and_summarize(tmp_path):
         conn.close()
 
 
+#: FLOPs for the fixture's few-millisecond regions, chosen to land near half of
+#: a 989 TFLOPS peak. Every one of these was 1e18, which put the regions between
+#: 10,111% and 101,112,234,580% of peak -- readings the tests asserted as valid
+#: results, so none of them could notice that the skill never refused one.
+_PLAUSIBLE_REGION_FLOPS = 5e8
+
+
 def test_compute_mfu_metrics_for_region():
+    # 50% of a 989 TFLOPS peak over the 10 s below. It was 1e18, which is
+    # 100,000 TFLOPS achieved -- 10,111% MFU -- and the test asserted that as a
+    # valid result. An impossible reading asserted as valid is why #385 could
+    # ship in arithmetic_intensity and why this skill had no guard either.
     out = compute_mfu_metrics_for_region(
-        theoretical_flops=1e18,
+        theoretical_flops=0.5 * 989e12 * 10.0,
         peak_tflops=989.0,
         wall_time_s=10.0,
         kernel_sum_s=10.0,
         kernel_union_s=10.0,
     )
     assert "error" not in out
-    assert out["mfu_pct_wall"] == round(100.0 * ((1e18 / 10.0) / 1e12) / 989.0, 2)
+    assert out["mfu_pct_wall"] == 50.0
 
 
 def test_compute_region_mfu_from_conn_happy_path(tmp_path):
@@ -117,7 +128,7 @@ def test_compute_region_mfu_from_conn_happy_path(tmp_path):
             conn,
             str(db),
             "FlashAttention",
-            theoretical_flops=1e18,
+            theoretical_flops=_PLAUSIBLE_REGION_FLOPS,
             peak_tflops=None,
             occurrence_index=1,
             device_id=0,
@@ -213,7 +224,7 @@ def test_compute_region_mfu_from_conn_textid_schema(tmp_path):
             conn,
             str(db),
             "FlashAttnFwd",
-            theoretical_flops=1e18,
+            theoretical_flops=_PLAUSIBLE_REGION_FLOPS,
             peak_tflops=None,
             occurrence_index=1,
             device_id=0,
@@ -238,7 +249,7 @@ def test_compute_region_mfu_from_conn_multi_gpu(tmp_path):
             conn,
             str(db),
             "FlashAttention",
-            1e18,
+            _PLAUSIBLE_REGION_FLOPS,
             peak_tflops=None,
             num_gpus=1,
             device_id=0,
@@ -247,7 +258,7 @@ def test_compute_region_mfu_from_conn_multi_gpu(tmp_path):
             conn,
             str(db),
             "FlashAttention",
-            1e18,
+            _PLAUSIBLE_REGION_FLOPS,
             peak_tflops=None,
             num_gpus=2,
             device_id=0,
@@ -275,7 +286,7 @@ def test_compute_region_mfu_kernel_mode(tmp_path):
             conn,
             str(db),
             "k_flash",  # matches kernel shortName via StringIds
-            theoretical_flops=1e18,
+            theoretical_flops=_PLAUSIBLE_REGION_FLOPS,
             source="kernel",
             peak_tflops=None,
             device_id=0,
@@ -332,3 +343,67 @@ def test_compute_theoretical_flops_missing_dims():
     result = compute_theoretical_flops("attention", hidden_dim=0, seq_len=0)
     assert "error" in result
     assert result["error"]["code"] == "INVALID_ARGUMENT"
+
+
+# ── An impossible MFU is a malformed question, not a fast region ────────────
+
+
+def _metrics(flops, peak, *, wall=6.158, ksum=6.2, kunion=6.1):
+    return compute_mfu_metrics_for_region(
+        theoretical_flops=flops,
+        peak_tflops=peak,
+        wall_time_s=wall,
+        kernel_sum_s=ksum,
+        kernel_union_s=kunion,
+    )
+
+
+def test_an_mfu_over_one_hundred_percent_is_refused():
+    """Hardware cannot exceed its own peak, so this is an input error.
+
+    The shape that produces it is a borrowed numerator: a FLOP count computed
+    for a whole job handed to a region that measures one rank, or a peak scaled
+    for more GPUs than the region covers. Both are easy on a multi-rank capture.
+
+    arithmetic_intensity already refuses this (#385), where a 369% reading was
+    published as "High kernel throughput (likely compute-bound)" with advice to
+    tune the kernel. This skill's entire output is MFU and it reported 108%.
+    """
+    out = _metrics(8.23e14 * 8, 989.0)
+
+    assert out["error"]["code"] == "MFU_EXCEEDS_PEAK"
+    assert "Refusing to report MFU" in out["error"]["message"]
+
+
+def test_the_refused_figures_do_not_reach_a_consumer_under_their_real_names():
+    """A caller reading mfu_pct_wall must not receive the repudiated number."""
+    out = _metrics(8.23e14 * 8, 989.0)
+
+    for leaked in ("mfu_pct_wall", "mfu_pct_kernel_sum", "mfu_pct_kernel_union"):
+        assert leaked not in out, f"{leaked} survived the refusal"
+    # Kept under a prefix, because they are what shows the caller their mistake.
+    assert out["implied_mfu_pct_wall"] > 100.0
+    assert out["peak_tflops"] == 989.0
+
+
+def test_exactly_peak_still_reports():
+    """100% is achievable, if unlikely. The refusal is for the impossible."""
+    out = _metrics(989e12, 989.0, wall=1.0, ksum=1.0, kunion=1.0)
+
+    assert "error" not in out
+    assert out["mfu_pct_wall"] == 100.0
+
+
+def test_a_one_percent_overshoot_is_refused_too():
+    """No tolerance band: a band only decides how much nonsense to publish."""
+    out = _metrics(989e12 * 1.01, 989.0, wall=1.0, ksum=1.0, kunion=1.0)
+
+    assert out["error"]["code"] == "MFU_EXCEEDS_PEAK"
+
+
+def test_a_believable_mfu_is_untouched():
+    """The guard must not disturb the ordinary case."""
+    out = _metrics(8.23e14, 989.0 * 8)
+
+    assert "error" not in out
+    assert 0 < out["mfu_pct_wall"] < 100
