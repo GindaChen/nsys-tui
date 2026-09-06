@@ -393,3 +393,81 @@ def test_skill_is_enrolled_in_evidence_pipeline():
     assert EvidenceBuilder._SKILL_PIPELINE["kernel_launch_overhead"] == (
         "kernel_launch_overhead", {}
     )
+
+
+def _fanout_connection():
+    """One launch API call correlated to two differently-named kernels.
+
+    This is the shape of a CUDA graph replay -- a set of nodes dispatched by one
+    call -- and the shape the api_charge_ns accounting exists to handle.
+    """
+    conn = sqlite3.connect(":memory:")
+    conn.executescript(
+        """
+        CREATE TABLE StringIds (id INTEGER PRIMARY KEY, value TEXT);
+        CREATE TABLE CUPTI_ACTIVITY_KIND_RUNTIME (
+            start INTEGER, "end" INTEGER, correlationId INTEGER,
+            globalTid INTEGER, nameId INTEGER);
+        CREATE TABLE CUPTI_ACTIVITY_KIND_KERNEL (
+            start INTEGER, "end" INTEGER, deviceId INTEGER, streamId INTEGER,
+            correlationId INTEGER, globalPid INTEGER, demangledName INTEGER,
+            shortName INTEGER, graphNodeId INTEGER, graphId INTEGER);
+        INSERT INTO StringIds VALUES (10,'cudaLaunchKernel'),(20,'gemm_kernel'),(21,'bias_kernel');
+        """
+    )
+    conn.execute(
+        "INSERT INTO CUPTI_ACTIVITY_KIND_RUNTIME VALUES (8000, 9000, 7, ?, 10)",
+        (0x100000007,),
+    )
+    for index, (short_name, node_id) in enumerate([(20, 101), (21, 102)]):
+        conn.execute(
+            "INSERT INTO CUPTI_ACTIVITY_KIND_KERNEL VALUES (?,?,0,7,7,?,?,?,?,42)",
+            (10_000 + index * 20, 10_005 + index * 20, 0x100000000, short_name, short_name, node_id),
+        )
+    conn.commit()
+    return conn
+
+
+def test_a_fan_out_to_several_kernel_names_does_not_crash_the_formatter():
+    """The charge lands once; the other names must still render.
+
+    api_charge_ns is assigned to one row per API call while the outer query
+    groups by kernel name, so every name but the earliest holds nothing but
+    zeros. ``AVG(NULLIF(x, 0))`` over an all-zero group is NULL, and both the
+    formatter and the finding builder assumed a float -- ``TypeError:
+    unsupported format string passed to NoneType.__format__``.
+    """
+    conn = _fanout_connection()
+
+    rows = SKILL.execute_fn(conn, min_launches=1, device=0)
+    by_name = {row["kernel_name"]: row for row in rows}
+
+    assert by_name["gemm_kernel"]["avg_api_us"] == 1.0
+    assert by_name["bias_kernel"]["avg_api_us"] == 0.0
+    assert isinstance(SKILL.format_rows(rows), str)
+
+
+def test_a_zero_charge_row_says_it_was_charged_elsewhere():
+    """0.0 alone reads as a free launch, which is the wrong conclusion.
+
+    The dispatch was not cheap for bias_kernel; it was paid once and booked
+    against the kernel that happened to start first. api_calls_charged is what
+    separates the two, so a reader is not left inferring it from a zero.
+    """
+    conn = _fanout_connection()
+
+    by_name = {r["kernel_name"]: r for r in SKILL.execute_fn(conn, min_launches=1, device=0)}
+
+    assert by_name["gemm_kernel"]["api_calls_charged"] == 1
+    assert by_name["bias_kernel"]["api_calls_charged"] == 0
+    assert by_name["bias_kernel"]["total_api_ms"] == 0.0
+
+
+def test_findings_survive_a_zero_charge_row():
+    """to_findings called float() on the same value and raised there too."""
+    conn = _fanout_connection()
+    rows = SKILL.execute_fn(conn, min_launches=1, device=0)
+
+    findings = SKILL.to_findings_fn(rows, context={"profile_id": "p"})
+
+    assert isinstance(findings, list)
