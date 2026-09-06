@@ -479,9 +479,26 @@ def _clone_and_build(
             )
 
     # ── install_third_party.sh — downloads NVBit + nlohmann/json ────────────
+    # Keyed on the tag, not just on nvbit's presence. What the script fetches
+    # changes between releases: v0.3.0 added src/trace_rapidjson.cpp and a
+    # RapidJSON download to go with it, which v0.2.1 neither built nor fetched.
+    # Testing only for third_party/nvbit meant an existing v0.2.1 tree checked
+    # out to v0.3.0 skipped the download it now needs, and the build failed on
+    # missing RapidJSON headers unless the host happened to have them. The stamp
+    # records which tag the tree was provisioned for, so any future bump
+    # re-provisions rather than compiling against a stale dependency set.
     third_party_nvbit = clone_dir / "third_party" / "nvbit"
-    if not third_party_nvbit.exists():
+    third_party_stamp = clone_dir / "third_party" / ".nsys-ai-provisioned-tag"
+    provisioned_tag = (
+        third_party_stamp.read_text().strip() if third_party_stamp.is_file() else None
+    )
+    if not third_party_nvbit.exists() or provisioned_tag != CUTRACER_TAG:
         if progress:
+            if provisioned_tag and provisioned_tag != CUTRACER_TAG:
+                print(
+                    f"  third_party was provisioned for {provisioned_tag}, "
+                    f"now building {CUTRACER_TAG} — re-running install_third_party.sh"
+                )
             print("  Running install_third_party.sh (downloads NVBit …)")
         r = subprocess.run(  # nosec B603 B607
             ["bash", "install_third_party.sh"],
@@ -494,9 +511,13 @@ def _clone_and_build(
                 f"install_third_party.sh failed (exit {r.returncode}):\n"
                 f"{getattr(r, 'stderr', '')}"
             )
+        third_party_stamp.parent.mkdir(parents=True, exist_ok=True)
+        third_party_stamp.write_text(f"{CUTRACER_TAG}\n")
     else:
         if progress:
-            print("  third_party/nvbit already present — skipping download")
+            print(
+                f"  third_party already provisioned for {CUTRACER_TAG} — skipping download"
+            )
 
     # ── make ─────────────────────────────────────────────────────────────────
     if so_dest.exists():
