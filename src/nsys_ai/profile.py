@@ -36,6 +36,9 @@ from nsys_ai.exceptions import (
 )
 from nsys_ai.profile_reference import inspect_local_parquetdir
 
+#: Distinguishes "not probed yet" from a probe that answered None (unknown).
+_UNPROBED = object()
+
 # Regex for safe SQL identifiers (table/column names).
 _SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -135,6 +138,7 @@ class NsightSchema:
         self.graph_node_events_table = self._resolve_table("CUDA_GRAPH_NODE_EVENTS")
         self.graph_trace_table = self._resolve_table("CUPTI_ACTIVITY_KIND_GRAPH_TRACE")
         self.kernel_graph_columns: dict[str, str] = {}
+        self._graph_rows_probe: bool | None | object = _UNPROBED
         if self.kernel_table:
             try:
                 self.kernel_graph_columns = kernel_graph_columns(
@@ -296,6 +300,33 @@ class NsightSchema:
                 return t
         return None
 
+    def _graph_rows_present(self) -> bool | None:
+        """True when a kernel row actually carries a graph id; None if unknown.
+
+        Probed rather than inferred from the columns, because the Parquet cache
+        synthesises them for a capture that has none. Lazy and memoised: only a
+        caller asking about graph capability pays for the query, which keeps it
+        off the open path where it would be a scan nobody asked for.
+        """
+        if self._graph_rows_probe is not _UNPROBED:
+            return self._graph_rows_probe
+
+        self._graph_rows_probe = None
+        if self.kernel_table and self.kernel_graph_columns:
+            predicate = " OR ".join(
+                f'"{column}" IS NOT NULL' for column in self.kernel_graph_columns.values()
+            )
+            try:
+                row = self._adapter.execute(
+                    f"SELECT 1 FROM {self.kernel_table} WHERE {predicate} LIMIT 1"  # nosec B608
+                ).fetchone()
+                self._graph_rows_probe = row is not None
+            except DB_ERRORS:
+                # Unknown, not absent. An optional probe must not turn a
+                # readable profile into a failure.
+                self._graph_rows_probe = None
+        return self._graph_rows_probe
+
     @property
     def cuda_graph(self) -> dict[str, object]:
         """Optional CUDA Graph capability visible in this export.
@@ -304,7 +335,11 @@ class NsightSchema:
         not enter :meth:`missing_required_columns`; pre-2026 captures remain
         fully analyzable through the non-graph path.
         """
-        return graph_capability(self.tables, self.kernel_graph_columns)
+        return graph_capability(
+            self.tables,
+            self.kernel_graph_columns,
+            kernel_rows_present=self._graph_rows_present(),
+        )
 
     def _missing_columns(self, table: str, required) -> list[str]:
         try:

@@ -74,6 +74,7 @@ def _insert_graph_replay(conn):
 
 def test_schema_detects_graph_tables_and_optional_kernel_columns():
     conn = _graph_connection()
+    _insert_graph_replay(conn)          # columns alone are not the claim; rows are
     schema = NsightSchema(conn)
 
     assert schema.kernel_graph_columns == {
@@ -226,3 +227,44 @@ def test_the_arrow_writer_reads_the_sparse_graph_fields():
 
     assert map_tbl.column("graph_node_id").to_pylist() == [None]
     assert map_tbl.column("graph_id").to_pylist() == [None]
+
+
+def test_graph_columns_without_graph_rows_do_not_claim_attribution():
+    """The Parquet cache synthesises these columns for a capture that has none.
+
+    ``_optional_graph_projection`` emits ``NULL AS graph_node_id, NULL AS
+    graph_id`` so downstream SQL need not branch on whether a profile predates
+    graph tracing. Reading that as evidence meant a cached pre-graph profile
+    reported CUDA Graph attribution as available, and the same profile answered
+    differently before and after its cache was built.
+
+    The spelling cannot separate the two either: the cache normalises real graph
+    data to the same snake_case names it synthesises. Only the data settles it.
+    """
+    conn = _graph_connection()          # columns present, no rows inserted
+    schema = NsightSchema(conn)
+
+    capability = schema.cuda_graph
+
+    assert schema.kernel_graph_columns, "the columns are there"
+    assert capability["kernel_attribution"] is False, "but nothing carries a graph id"
+    assert capability["kernel_rows_present"] is False
+    # Still worth reporting: the metadata tables are real and useful to doctor.
+    assert capability["available"] is True
+
+
+def test_a_versioned_graph_activity_table_is_resolved():
+    """Nsight suffixes activity tables _V2/_V3 on newer exports.
+
+    An exact-name comparison dropped them, so a profile carrying
+    CUPTI_ACTIVITY_KIND_GRAPH_TRACE_V3 reported no graph metadata at all. The
+    repository's Nsight table-name contract requires the shared resolver.
+    """
+    from nsys_ai.cuda_graph import graph_tables
+
+    for name in (
+        "CUPTI_ACTIVITY_KIND_GRAPH_TRACE",
+        "CUPTI_ACTIVITY_KIND_GRAPH_TRACE_V2",
+        "CUPTI_ACTIVITY_KIND_GRAPH_TRACE_V3",
+    ):
+        assert graph_tables([name]), f"{name} was dropped"
