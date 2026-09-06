@@ -185,8 +185,21 @@ TOOL_COMPUTE_REGION_MFU = {
                 },
                 "occurrence_index": {
                     "type": "integer",
-                    "description": "Which matching NVTX occurrence to use (1-based, only for source='nvtx'). Default 1.",
+                    "description": (
+                        "Which matching NVTX occurrence to use (1-based, only for "
+                        "source='nvtx'). Default 1. On a multi-rank capture every rank "
+                        "carries the same annotation, so occurrences span processes "
+                        "unless 'pid' narrows them to one."
+                    ),
                     "default": 1,
+                },
+                "pid": {
+                    "type": "integer",
+                    "description": (
+                        "Measure this process's copy of the range (source='nvtx' only). "
+                        "The result reports 'pid' for whichever process it measured, so "
+                        "an MFU can be attributed to a rank."
+                    ),
                 },
                 "device_id": {
                     "type": "integer",

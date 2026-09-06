@@ -410,6 +410,16 @@ def test_a_believable_mfu_is_untouched():
 # ── Which rank did we measure? ──────────────────────────────────────────────
 
 
+def _make_global_tid(pid: int, tid: int) -> int:
+    """Encode as Nsight does: a flag bit above a 24-bit pid above a 24-bit tid.
+
+    The committed h100_2gpu_1s fixture carries 0x100006f00006f -- bit 48 set,
+    pid 111, tid 111. Building test ids without that bit is what let a decoder
+    that only shifted look correct.
+    """
+    return (1 << 48) | ((pid & 0xFFFFFF) << 24) | (tid & 0xFFFFFF)
+
+
 def _multi_rank_conn(ranks=8, base_pid=3822370):
     """One capture holding every rank of a torchrun job, as nsys writes it.
 
@@ -425,7 +435,7 @@ def _multi_rank_conn(ranks=8, base_pid=3822370):
     )
     conn.execute("CREATE TABLE StringIds (id INTEGER PRIMARY KEY, value TEXT)")
     for index in range(ranks):
-        global_tid = ((base_pid + index) << 24) | 1234
+        global_tid = _make_global_tid(base_pid + index, tid=1234)
         conn.execute(
             "INSERT INTO NVTX_EVENTS VALUES (?,?,?,?,59,?,NULL)",
             (
@@ -441,11 +451,26 @@ def _multi_rank_conn(ranks=8, base_pid=3822370):
 
 
 def test_pid_is_recovered_from_the_nsight_encoding():
-    """nsys packs the process into the high bits of globalTid."""
+    """The pid is a 24-bit field at bit 24, not everything above the tid.
+
+    A bare ``>> 24`` keeps whatever sits above the field. The committed fixture
+    sets bit 48, so it read pid 16,777,327 where the pid is 111 -- and a request
+    for the real pid then matched nothing.
+    """
+    import sqlite3
+
     from nsys_ai.region_mfu import pid_from_global_tid
 
-    assert pid_from_global_tid((3822370 << 24) | 1234) == 3822370
+    assert pid_from_global_tid(_make_global_tid(3822370, tid=1234)) == 3822370
     assert pid_from_global_tid(None) is None
+
+    # Against the real encoding in a committed capture, not a constructed one.
+    conn = sqlite3.connect("tests/fixtures/h100_2gpu_1s.sqlite")
+    real = [row[0] for row in conn.execute("SELECT DISTINCT globalTid FROM NVTX_EVENTS LIMIT 2")]
+    assert real, "the fixture should carry NVTX rows"
+    for global_tid in real:
+        decoded = pid_from_global_tid(global_tid)
+        assert 0 < decoded < 0xFFFFFF, f"{global_tid:#x} decoded to an impossible pid {decoded}"
 
 
 def test_every_occurrence_is_a_different_rank():
@@ -477,3 +502,30 @@ def test_a_rank_can_be_asked_for_directly():
 
     assert len(selected) == 1
     assert pid_from_global_tid(selected[0]["global_tid"]) == wanted
+
+
+def test_pid_is_refused_in_kernel_mode():
+    """There is no per-occurrence process to narrow to, so it must not be ignored."""
+    from nsys_ai.region_mfu import compute_region_mfu_from_conn
+
+    out = compute_region_mfu_from_conn(
+        _multi_rank_conn(),
+        profile_path=None,
+        name="anything",
+        theoretical_flops=1.0,
+        source="kernel",
+        pid=3822374,
+    )
+
+    assert out["error"]["code"] == "INVALID_ARGUMENT"
+    assert "source='nvtx'" in out["error"]["message"]
+
+
+def test_the_chat_tool_exposes_and_forwards_pid():
+    """A selector the chat path cannot reach is a selector most callers lack."""
+    from nsys_ai.ai.backend.chat_tools import TOOL_COMPUTE_REGION_MFU
+
+    schema = TOOL_COMPUTE_REGION_MFU.get("input_schema") or TOOL_COMPUTE_REGION_MFU[
+        "function"
+    ]["parameters"]
+    assert "pid" in schema["properties"]

@@ -49,18 +49,19 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-#: Nsight packs the process id into the high bits of ``globalTid``. The mask
-#: form of this same fact is already applied elsewhere as
-#: ``globalTid & CAST(-16777216 AS BIGINT)``, which clears the low 24 bits and
-#: leaves ``pid << 24``; shifting is the other half of it.
+#: Nsight packs the process id into bits 24-47 of ``globalTid`` -- a 24-bit
+#: field, not every bit above the thread id. Shifting alone keeps whatever sits
+#: above it: the committed h100_2gpu_1s fixture carries 0x100006f00006f, where
+#: bit 48 is set, so a bare ``>> 24`` reads pid 16,777,327 instead of 111.
 _GLOBAL_TID_PID_SHIFT = 24
+_GLOBAL_TID_PID_MASK = 0xFFFFFF
 
 
 def pid_from_global_tid(global_tid: int | None) -> int | None:
     """The process a ``globalTid`` belongs to, or None when there is none."""
     if global_tid is None:
         return None
-    return int(global_tid) >> _GLOBAL_TID_PID_SHIFT
+    return (int(global_tid) >> _GLOBAL_TID_PID_SHIFT) & _GLOBAL_TID_PID_MASK
 
 
 def _error(code: str, message: str, **detail) -> ErrorDict:
@@ -702,6 +703,15 @@ def compute_region_mfu_from_conn(
     # ---------------------------------------------------------------
     # Branch: source="kernel" — query kernels directly by name
     # ---------------------------------------------------------------
+    if source == "kernel" and pid is not None:
+        return _error(
+            "INVALID_ARGUMENT",
+            "pid selects which process's NVTX range to measure, so it applies to "
+            "source='nvtx'. In kernel mode the region is every matching kernel, "
+            "with no per-occurrence process to narrow to. Drop pid, or switch to "
+            "source='nvtx' and name the range.",
+        )
+
     if source == "kernel":
         kernels = find_kernels_by_name(
             conn,

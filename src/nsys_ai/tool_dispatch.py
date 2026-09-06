@@ -324,6 +324,11 @@ class ToolDispatcher:
                             else None
                         ),
                         "match_mode": str(args.get("match_mode") or "contains"),
+                        "pid": (
+                            int(args["pid"])
+                            if "pid" in args and args["pid"] is not None
+                            else None
+                        ),
                     },
                 )
                 result = rows[0] if len(rows) == 1 else rows
