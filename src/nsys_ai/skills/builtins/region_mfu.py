@@ -29,6 +29,9 @@ def _execute(conn, **kwargs):
     if device_id is not None:
         device_id = int(device_id)
     match_mode = kwargs.get("match_mode", "contains")
+    pid = kwargs.get("pid")
+    if pid is not None:
+        pid = int(pid)
 
     result = compute_region_mfu_from_conn(
         conn,
@@ -41,6 +44,7 @@ def _execute(conn, **kwargs):
         occurrence_index=occurrence_index,
         device_id=device_id,
         match_mode=match_mode,
+        pid=pid,
     )
     return [result]
 
@@ -214,8 +218,24 @@ SKILL = Skill(
             "peak_tflops", "GPU peak TFLOPS (auto-detected if omitted)", "float", False, None
         ),
         SkillParam("num_gpus", "Number of GPUs (for DP/TP adjustment)", "int", False, 1),
-        SkillParam("occurrence_index", "Which occurrence to analyze (1-based)", "int", False, 1),
+        SkillParam(
+            "occurrence_index",
+            "Which occurrence to analyze (1-based). Occurrences span processes "
+            "on a multi-rank capture unless 'pid' narrows them to one.",
+            "int",
+            False,
+            1,
+        ),
         SkillParam("device_id", "GPU device ID filter", "int", False, None),
+        SkillParam(
+            "pid",
+            "Process to measure. On a multi-rank capture every rank carries the "
+            "same annotation, so occurrence_index walks ranks; this picks one "
+            "directly. The result row reports 'pid' for whichever it measured.",
+            "int",
+            False,
+            None,
+        ),
         SkillParam(
             "match_mode",
             "Name matching: 'contains', 'exact', 'startswith'",
