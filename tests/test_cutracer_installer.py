@@ -524,3 +524,77 @@ class TestInstall:
 
         assert not result.success
         assert any("git clone" in e or "clone" in e.lower() for e in result.errors)
+
+
+class TestThirdPartyProvisioning:
+    """`install_third_party.sh` is keyed on the tag, not on nvbit's presence.
+
+    What that script fetches changes between releases: v0.3.0 added
+    ``src/trace_rapidjson.cpp`` and a RapidJSON download to go with it, and
+    v0.2.1 had neither. A tree provisioned under the old tag and checked out to
+    the new one therefore has nvbit but no RapidJSON, and testing only for
+    ``third_party/nvbit`` skipped the download the build now depends on.
+    """
+
+    @staticmethod
+    def _clone(tmp_path, *, provisioned_for=None):
+        clone = tmp_path / "cutracer"
+        (clone / "third_party" / "nvbit").mkdir(parents=True)
+        (clone / "Makefile").write_text("all:\n\techo built\n")
+        (clone / "install_third_party.sh").write_text("#!/bin/bash\nexit 0\n")
+        if provisioned_for is not None:
+            (clone / "third_party" / ".nsys-ai-provisioned-tag").write_text(
+                provisioned_for + "\n"
+            )
+        return clone
+
+    def _ran_third_party(self, monkeypatch, clone):
+        """Run the build far enough to see whether the script was invoked."""
+        import subprocess as _sp
+
+        from nsys_ai.cutracer import installer
+
+        calls = []
+        real_run = _sp.run
+
+        def _fake_run(cmd, *args, **kwargs):
+            calls.append(cmd)
+            if cmd and cmd[0] == "bash":
+                (clone / "third_party" / "rapidjson").mkdir(exist_ok=True)
+            return real_run(["true"], *args, **kwargs)
+
+        monkeypatch.setattr(installer.subprocess, "run", _fake_run)
+        # Stop before the compile; only the provisioning decision is under test.
+        (clone / "lib").mkdir(exist_ok=True)
+        (clone / "lib" / "cutracer.so").write_text("")
+        installer._clone_and_build(clone_dir=clone, progress=False)
+        return any(c and c[0] == "bash" for c in calls)
+
+    def test_a_tree_provisioned_for_an_older_tag_is_reprovisioned(
+        self, tmp_path, monkeypatch
+    ):
+        from nsys_ai.cutracer.installer import CUTRACER_TAG
+
+        clone = self._clone(tmp_path, provisioned_for="v0.2.1")
+        assert CUTRACER_TAG != "v0.2.1", "this test needs the tag to have moved"
+
+        assert self._ran_third_party(monkeypatch, clone), (
+            "a stale dependency set must be re-provisioned, not built against"
+        )
+
+    def test_a_tree_provisioned_for_the_current_tag_is_left_alone(
+        self, tmp_path, monkeypatch
+    ):
+        from nsys_ai.cutracer.installer import CUTRACER_TAG
+
+        clone = self._clone(tmp_path, provisioned_for=CUTRACER_TAG)
+
+        assert not self._ran_third_party(monkeypatch, clone), (
+            "re-downloading on every install would be a needless cost"
+        )
+
+    def test_an_unstamped_tree_is_reprovisioned(self, tmp_path, monkeypatch):
+        """Every clone made before this change has nvbit and no stamp."""
+        clone = self._clone(tmp_path, provisioned_for=None)
+
+        assert self._ran_third_party(monkeypatch, clone)

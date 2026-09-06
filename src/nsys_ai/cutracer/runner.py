@@ -48,7 +48,10 @@ class RunConfig:
     """Local directory where histogram CSVs will land."""
 
     kernel_filter: list[str] = field(default_factory=list)
-    """Normalised kernel name tokens for ``CUTRACER_KERNEL_FILTER``."""
+    """Normalised kernel name tokens, passed as ``--kernel-filters``.
+
+    Not an environment variable: no ``CUTRACER_KERNEL_FILTER`` exists upstream at
+    v0.2.1 or v0.3.0, and this is sent on the command line."""
 
     so_path: Path | None = None
     """Path to ``cutracer.so``.  ``None`` → auto-detect at runtime."""
