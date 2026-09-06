@@ -407,3 +407,73 @@ def test_a_believable_mfu_is_untouched():
 
     assert "error" not in out
     assert 0 < out["mfu_pct_wall"] < 100
+# ── Which rank did we measure? ──────────────────────────────────────────────
+
+
+def _multi_rank_conn(ranks=8, base_pid=3822370):
+    """One capture holding every rank of a torchrun job, as nsys writes it.
+
+    Megatron annotates each rank identically and the ranges overlap in time, so
+    one name matches once per rank. occurrence_index then walks ranks rather
+    than iterations, ordered by start time -- which for concurrent ranks is
+    scheduling noise, and not stable across a re-capture.
+    """
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        'CREATE TABLE NVTX_EVENTS (globalTid INTEGER, start INTEGER, "end" INTEGER, '
+        "text TEXT, eventType INTEGER, rangeId INTEGER, textId INTEGER)"
+    )
+    conn.execute("CREATE TABLE StringIds (id INTEGER PRIMARY KEY, value TEXT)")
+    for index in range(ranks):
+        global_tid = ((base_pid + index) << 24) | 1234
+        conn.execute(
+            "INSERT INTO NVTX_EVENTS VALUES (?,?,?,?,59,?,NULL)",
+            (
+                global_tid,
+                39_964_000_000 + index * 1_000,
+                46_122_000_000 + index * 1_000,
+                "sample_0(repeat=5)",
+                index,
+            ),
+        )
+    conn.commit()
+    return conn
+
+
+def test_pid_is_recovered_from_the_nsight_encoding():
+    """nsys packs the process into the high bits of globalTid."""
+    from nsys_ai.region_mfu import pid_from_global_tid
+
+    assert pid_from_global_tid((3822370 << 24) | 1234) == 3822370
+    assert pid_from_global_tid(None) is None
+
+
+def test_every_occurrence_is_a_different_rank():
+    """The situation this exists for, stated as a test."""
+    from nsys_ai.region_mfu import (
+        find_nvtx_ranges,
+        pid_from_global_tid,
+        select_nvtx_occurrence,
+    )
+
+    matches = find_nvtx_ranges(_multi_rank_conn(), "sample_0(repeat=5)", match_mode="exact")
+
+    assert len(matches) == 8
+    pids = [
+        pid_from_global_tid(select_nvtx_occurrence(matches, i)["global_tid"])
+        for i in range(1, 9)
+    ]
+    assert len(set(pids)) == 8, "eight occurrences, eight processes"
+
+
+def test_a_rank_can_be_asked_for_directly():
+    """Rather than guessed at through an occurrence index."""
+    from nsys_ai.region_mfu import find_nvtx_ranges, pid_from_global_tid
+
+    matches = find_nvtx_ranges(_multi_rank_conn(), "sample_0(repeat=5)", match_mode="exact")
+    wanted = 3822374
+
+    selected = [m for m in matches if pid_from_global_tid(m.get("global_tid")) == wanted]
+
+    assert len(selected) == 1
+    assert pid_from_global_tid(selected[0]["global_tid"]) == wanted

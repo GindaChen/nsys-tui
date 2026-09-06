@@ -49,6 +49,20 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+#: Nsight packs the process id into the high bits of ``globalTid``. The mask
+#: form of this same fact is already applied elsewhere as
+#: ``globalTid & CAST(-16777216 AS BIGINT)``, which clears the low 24 bits and
+#: leaves ``pid << 24``; shifting is the other half of it.
+_GLOBAL_TID_PID_SHIFT = 24
+
+
+def pid_from_global_tid(global_tid: int | None) -> int | None:
+    """The process a ``globalTid`` belongs to, or None when there is none."""
+    if global_tid is None:
+        return None
+    return int(global_tid) >> _GLOBAL_TID_PID_SHIFT
+
+
 def _error(code: str, message: str, **detail) -> ErrorDict:
     """A refusal row: the coded error, plus any fields the caller needs to act.
 
@@ -664,6 +678,7 @@ def compute_region_mfu_from_conn(
     occurrence_index: int = 1,
     device_id: int | None = None,
     match_mode: str = "contains",
+    pid: int | None = None,
 ) -> RowDict | ErrorDict:
     """
     Compute MFU for a named region using an existing SQLite connection.
@@ -722,7 +737,32 @@ def compute_region_mfu_from_conn(
                 "annotation. Re-capture with NVTX enabled, or pass "
                 "source='kernel' to match kernels by name instead.",
             )
-        matches = find_nvtx_ranges(conn, name, match_mode=match_mode)
+        all_matches = matches = find_nvtx_ranges(conn, name, match_mode=match_mode)
+        # Narrow to one process first, so occurrence_index indexes within a
+        # rank rather than across them. On a multi-rank capture every rank
+        # carries the same annotation over an overlapping window, so without
+        # this the index walks ranks in start-time order -- which for concurrent
+        # ranks is scheduling noise, and not stable across a re-capture.
+        if pid is not None:
+            matches = [m for m in matches if pid_from_global_tid(m.get("global_tid")) == pid]
+            if not matches:
+                available = sorted(
+                    {
+                        p
+                        for p in (pid_from_global_tid(m.get("global_tid")) for m in all_matches)
+                        if p is not None
+                    }
+                )
+                return _error(
+                    "NVTX_NOT_FOUND",
+                    f"No NVTX range matched the requested name in process {pid}. "
+                    + (
+                        f"Processes carrying it: {', '.join(str(p) for p in available)}."
+                        if available
+                        else "No match carries a process id."
+                    ),
+                )
+
         chosen = select_nvtx_occurrence(matches, occurrence_index)
         if "error" in chosen:
             return chosen
@@ -781,6 +821,18 @@ def compute_region_mfu_from_conn(
         "name": name,
         "matched_text": matched_name,
         "match_mode": match_mode,
+        # Which process this occurrence came from. Read out of the profile and
+        # then dropped before publication, which left a multi-rank capture
+        # unanswerable: nsys packs every rank of a torchrun job into one file,
+        # Megatron annotates them identically, and the ranges overlap in time --
+        # so a name matches once per rank and occurrence_index walks ranks
+        # rather than iterations. Without this a reported MFU could not be
+        # attributed to a rank, and two runs of the same command could measure
+        # different ones with nothing in the output differing.
+        "global_tid": int(chosen["global_tid"])
+        if source == "nvtx" and chosen.get("global_tid") is not None
+        else None,
+        "pid": pid_from_global_tid(chosen.get("global_tid")) if source == "nvtx" else None,
         "occurrence_index": int(chosen.get("occurrence_index", occurrence_index))
         if source == "nvtx"
         else None,
@@ -811,6 +863,7 @@ def compute_region_mfu(
     occurrence_index: int = 1,
     device_id: int | None = None,
     match_mode: str = "contains",
+    pid: int | None = None,
 ) -> RowDict | ErrorDict:
     """
     Convenience wrapper that opens the profile for MFU computation.
@@ -843,6 +896,7 @@ def compute_region_mfu(
             occurrence_index=occurrence_index,
             device_id=device_id,
             match_mode=match_mode,
+            pid=pid,
         )
     finally:
         conn.close()
