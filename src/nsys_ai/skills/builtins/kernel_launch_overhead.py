@@ -194,8 +194,18 @@ def _execute(conn, **kwargs):
             l.device_id,
             COUNT(*) AS launch_count,
             ROUND(SUM(l.api_charge_ns) / 1e6, 3) AS total_api_ms,
-            ROUND(AVG(NULLIF(l.api_charge_ns, 0)) / 1e3, 1) AS avg_api_us,
+            -- COALESCE, because a group can hold no charged launch at all. The
+            -- charge lands on one row per API call, and the grouping is by
+            -- kernel name: a call that fans out to several different kernels --
+            -- which is what a graph replay is -- charges the earliest and leaves
+            -- every other name with nothing but zeros. NULLIF then makes the
+            -- whole group NULL, and both the formatter and the finding builder
+            -- assumed a float, so the skill raised TypeError instead of
+            -- reporting. api_calls_charged is what tells those rows apart from a
+            -- genuinely instant launch.
+            ROUND(COALESCE(AVG(NULLIF(l.api_charge_ns, 0)), 0) / 1e3, 1) AS avg_api_us,
             ROUND(MAX(l.api_charge_ns) / 1e3, 1) AS max_api_us,
+            SUM(CASE WHEN l.api_charge_ns > 0 THEN 1 ELSE 0 END) AS api_calls_charged,
             COUNT(l.queue_duration_ns) AS queue_count,
             ROUND(COALESCE(SUM(l.queue_duration_ns), 0) / 1e6, 3) AS total_queue_ms,
             ROUND(COALESCE(AVG(l.queue_duration_ns), 0) / 1e3, 1) AS avg_queue_us,
@@ -236,7 +246,7 @@ def _format(rows):
         if len(name) > 48:
             name = name[:45] + "..."
         lines.append(
-            f"{name:<50s}  {row['launch_count']:>9d}  {row['avg_api_us']:>11.1f}  "
+            f"{name:<50s}  {row['launch_count']:>9d}  {float(row.get('avg_api_us') or 0.0):>11.1f}  "
             f"{row['avg_queue_us']:>13.1f}  {row['avg_kernel_us']:>14.3f}"
         )
     return "\n".join(lines)
@@ -273,11 +283,12 @@ def _to_findings(rows: list[dict], *, context: dict | None = None) -> list:
                 "launch_count": launch_count,
                 "avg_kernel_us": round(avg_kernel_us, 3),
                 "total_kernel_ms": float(row["total_kernel_ms"]),
-                "avg_api_us": float(row["avg_api_us"]),
+                "avg_api_us": float(row.get("avg_api_us") or 0.0),
                 "total_api_ms": float(row["total_api_ms"]),
                 "queue_count": int(row["queue_count"]),
                 "avg_queue_us": float(row["avg_queue_us"]),
                 "total_queue_ms": float(row["total_queue_ms"]),
+                "api_calls_charged": int(row.get("api_calls_charged", 0) or 0),
                 "graph_node_count": int(row.get("graph_node_count", 0) or 0),
                 "graph_id_count": int(row.get("graph_id_count", 0) or 0),
             },
@@ -290,6 +301,7 @@ def _to_findings(rows: list[dict], *, context: dict | None = None) -> list:
                 "queue_count": "count",
                 "avg_queue_us": "microseconds",
                 "total_queue_ms": "ms",
+                "api_calls_charged": "count",
                 "graph_node_count": "count",
                 "graph_id_count": "count",
             },
