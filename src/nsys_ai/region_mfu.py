@@ -598,14 +598,26 @@ def compute_mfu_metrics_for_region(
     # No tolerance band: 1% over is as impossible as 300% over, and a band would
     # only decide how much nonsense to publish.
     #
-    # All three bases are checked because all three are published, and the
-    # denominators differ -- a borrowed numerator can land one over while the
-    # others sit under.
-    worst_basis, worst_mfu = max(
-        (("wall", mfu_wall), ("kernel_sum", mfu_sum), ("kernel_union", mfu_union)),
-        key=lambda pair: pair[1],
-    )
-    if worst_mfu > 100.0:
+    # Keyed on the kernel-union basis, which is the only one where exceeding
+    # peak is physically impossible: it is the time the GPU was actually busy,
+    # and no hardware does more FLOPs than peak x busy-time.
+    #
+    # The wall basis is not that test. get_region_kernels attributes kernels by
+    # the CPU call that launched them, and an asynchronous range can close while
+    # its work runs on -- a 1 ms CPU span launching 10 ms of GPU work reports a
+    # wall ratio far above 100% with nothing wrong. Refusing on that discarded a
+    # sound union-basis MFU and its SOL headroom along with it.
+    #
+    # The borrowed-numerator case this guard exists for puts every basis over,
+    # so keying on the strict one still catches it.
+    #
+    # The epsilon admits floating-point representation error and nothing else:
+    # 8901000000000 FLOPs over 0.009 s against 989 TFLOPS is exactly peak and
+    # computes to 100.00000000000001, which was refused while the message it
+    # printed said 100.0%. It is not a tolerance band -- a band would decide how
+    # much nonsense to publish, and 1e-9 of a percentage point publishes none.
+    worst_basis, worst_mfu = "kernel_union", mfu_union
+    if worst_mfu > 100.0 + 1e-9:
         return _error(
             "MFU_EXCEEDS_PEAK",
             f"Refusing to report MFU. On the {worst_basis} basis this calculation puts the "
