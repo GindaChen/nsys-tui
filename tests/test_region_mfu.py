@@ -529,3 +529,58 @@ def test_the_chat_tool_exposes_and_forwards_pid():
         "function"
     ]["parameters"]
     assert "pid" in schema["properties"]
+
+
+def test_exactly_peak_is_not_refused_by_roundoff():
+    """100.00000000000001 is representation error, not an impossible reading.
+
+    8901000000000 FLOPs over 0.009 s against a 989 TFLOPS peak is exactly peak.
+    It was refused while the refusal's own message printed "100.0% of peak".
+    """
+    out = compute_mfu_metrics_for_region(
+        theoretical_flops=8901000000000,
+        peak_tflops=989,
+        wall_time_s=0.009,
+        kernel_sum_s=0.009,
+        kernel_union_s=0.009,
+    )
+
+    assert "error" not in out
+    assert out["mfu_pct_kernel_union"] == 100.0
+
+
+def test_an_async_region_keeps_its_gpu_basis_mfu():
+    """A short CPU range can bound long GPU work without anything being wrong.
+
+    get_region_kernels attributes kernels by the CPU call that launched them,
+    and an asynchronous range can close while its work runs on. A 1 ms span
+    launching 10 ms of GPU work reports a wall ratio of 500% legitimately.
+    Refusing on that discarded a sound union-basis MFU and its SOL headroom.
+
+    Only the union basis is physically bounded: it is the time the GPU was
+    actually busy, so exceeding peak there is impossible rather than merely odd.
+    """
+    out = compute_mfu_metrics_for_region(
+        theoretical_flops=0.5 * 989e12 * 0.010,   # half of peak for 10 ms of work
+        peak_tflops=989.0,
+        wall_time_s=0.001,                        # the CPU range is 1 ms
+        kernel_sum_s=0.010,
+        kernel_union_s=0.010,
+    )
+
+    assert "error" not in out, "a sound GPU-basis reading must survive"
+    assert out["mfu_pct_kernel_union"] == 50.0
+    assert out["mfu_pct_wall"] > 100.0, "the wall ratio is high, and that is fine here"
+
+
+def test_the_borrowed_numerator_is_still_refused():
+    """Re-keying the guard must not let the case it exists for through."""
+    out = compute_mfu_metrics_for_region(
+        theoretical_flops=8.23e14 * 8,
+        peak_tflops=989.0,
+        wall_time_s=6.158,
+        kernel_sum_s=6.2,
+        kernel_union_s=6.1,
+    )
+
+    assert out["error"]["code"] == "MFU_EXCEEDS_PEAK"

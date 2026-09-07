@@ -543,7 +543,7 @@ class TestThirdPartyProvisioning:
         (clone / "Makefile").write_text("all:\n\techo built\n")
         (clone / "install_third_party.sh").write_text("#!/bin/bash\nexit 0\n")
         if provisioned_for is not None:
-            (clone / "third_party" / ".nsys-ai-provisioned-tag").write_text(
+            (clone.parent / f".{clone.name}-provisioned-tag").write_text(
                 provisioned_for + "\n"
             )
         return clone
@@ -598,3 +598,37 @@ class TestThirdPartyProvisioning:
         clone = self._clone(tmp_path, provisioned_for=None)
 
         assert self._ran_third_party(monkeypatch, clone)
+
+
+def test_the_provisioning_stamp_does_not_dirty_the_clone(tmp_path, monkeypatch):
+    """It must live beside the worktree, not in it.
+
+    CUTracer's .gitignore lists the individual dependency directories --
+    third_party/nvbit, nlohmann, rapidjson -- not third_party itself, so a file
+    of ours in there shows as untracked. _ensure_pinned_checkout refuses to
+    check out over a dirty worktree and runs before provisioning, so a stamp
+    inside the clone would make the first install block every later tag bump:
+    the exact reconciliation the stamp exists to trigger.
+    """
+    from nsys_ai.cutracer import installer
+
+    clone = tmp_path / "CUTracer"
+    (clone / "third_party" / "nvbit").mkdir(parents=True)
+    (clone / "Makefile").write_text("all:\n\techo built\n")
+    (clone / "install_third_party.sh").write_text("#!/bin/bash\nexit 0\n")
+    (clone / "lib").mkdir()
+    (clone / "lib" / "cutracer.so").write_text("")
+
+    import subprocess as _sp
+
+    real_run = _sp.run
+    monkeypatch.setattr(
+        installer.subprocess, "run", lambda cmd, *a, **k: real_run(["true"], *a, **k)
+    )
+    installer._clone_and_build(clone_dir=clone, progress=False)
+
+    written = list(clone.parent.glob(".*provisioned-tag"))
+    assert written, "the stamp should have been written"
+    assert not list(clone.rglob("*provisioned-tag")), (
+        "no stamp may sit inside the clone, where git would see it"
+    )

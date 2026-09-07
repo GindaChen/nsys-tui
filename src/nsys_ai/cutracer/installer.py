@@ -488,7 +488,14 @@ def _clone_and_build(
     # records which tag the tree was provisioned for, so any future bump
     # re-provisions rather than compiling against a stale dependency set.
     third_party_nvbit = clone_dir / "third_party" / "nvbit"
-    third_party_stamp = clone_dir / "third_party" / ".nsys-ai-provisioned-tag"
+    # Beside the clone, never inside it. CUTracer's .gitignore lists the
+    # individual dependency directories -- third_party/nvbit, nlohmann,
+    # rapidjson -- not third_party itself, so a file of ours in there is
+    # untracked and unignored. _ensure_pinned_checkout refuses to check out
+    # over a dirty worktree, and it runs before this code, so a stamp inside
+    # the clone would make the first install block every later tag bump: the
+    # exact reconciliation this stamp exists to trigger.
+    third_party_stamp = clone_dir.parent / f".{clone_dir.name}-provisioned-tag"
     provisioned_tag = (
         third_party_stamp.read_text().strip() if third_party_stamp.is_file() else None
     )
